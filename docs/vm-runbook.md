@@ -10,6 +10,8 @@ Django applies migrations and creates the recovery account on first start. Compo
 
 Run `python -m tests.compose_smoke` on a host with Docker Compose and Python to verify login, static assets, the closed registration URL, and persistence across a restart. The test uses disposable credentials, a random localhost port, and an isolated Compose project.
 
+The scheduler serializes processing with an operating-system lock file alongside the SQLite database. All scheduler processes for a database must use the same database path and a shared filesystem that supports these locks. After a process stops, the next scheduler invocation recovers unsubmitted occurrences and marks submitted, unfinished replies incomplete without resubmitting them. Django's chat recovery leaves scheduled attempts to the scheduler.
+
 ## Connect chat to an existing OmniRoute gateway
 
 Set `OMNIROUTE_URL` to the gateway base URL reachable from Django's container and `CHAT_MODEL` to the canonical route ID shown by that gateway. Put the inference key in `.secrets/omniroute_api_key` or set `OMNIROUTE_API_KEY_PATH` to its file path. Use an inference credential.
