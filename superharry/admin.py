@@ -3,10 +3,28 @@ from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group, User
 
 from . import route_admin  # Registers the chat route admin view.
+from .models import ChatLimits, UserChatLimits
 
 
 admin.site.unregister(User)
 admin.site.unregister(Group)
+
+
+@admin.register(ChatLimits)
+class ChatLimitsAdmin(admin.ModelAdmin):
+    list_display = ("daily_messages", "max_response_characters")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(UserChatLimits)
+class UserChatLimitsAdmin(admin.ModelAdmin):
+    list_display = ("user", "daily_messages", "max_response_characters")
+    list_select_related = ("user",)
 
 
 @admin.register(User)

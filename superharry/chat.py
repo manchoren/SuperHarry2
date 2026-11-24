@@ -1,12 +1,15 @@
 import json
+from contextlib import closing
+from hashlib import sha256
 from http.client import HTTPException
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.db.models.functions import Coalesce
-from django.http import JsonResponse, StreamingHttpResponse
+from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
@@ -14,6 +17,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .gateway import GatewayFailure, stream_reply
 from .models import ChatRoute, Conversation, Message
+from .quota import AdmissionDenied, admit
 
 
 @never_cache
@@ -38,49 +42,82 @@ def page(request, conversation_id=None):
         "conversation": conversation,
         "history": history,
         "active_model": ChatRoute.active_id(),
+        "submission_id": uuid4(),
     })
 
 
-def stream_message(reply, context, route_id):
+def stream_message(submission, route_id, max_response_characters):
+    reply = submission.reply
     complete = False
     error = "The model reply was interrupted."
     try:
-        for text in stream_reply(context, route_id=route_id):
-            reply.content += text
-            reply.save(update_fields=("content",))
-            yield json.dumps({"text": text}) + "\n"
+        # Prime the generator so Django can release the reservation even if
+        # the response is closed before its body is handed to the client.
+        yield
+        context = list(
+            reply.conversation.messages.filter(complete=True)
+            .annotate(turn_order=Coalesce("prompt_id", "pk"))
+            .filter(turn_order__lte=reply.prompt_id)
+            .order_by("turn_order", "pk")
+            .values("role", "content")
+        )
+        upstream = stream_reply(context, route_id=route_id, on_submit=submission.mark_submitted)
+        with closing(upstream):
+            for text in upstream:
+                remaining = max_response_characters - len(reply.content)
+                text = text[:remaining]
+                reply.content += text
+                reply.save(update_fields=("content",))
+                capped = len(reply.content) >= max_response_characters
+                complete = capped
+                yield json.dumps({"text": text}) + "\n"
+                if capped:
+                    break
         complete = True
     except GatewayFailure as failure:
         error = str(failure)
     except (OSError, ValueError, HTTPException):
         pass
     finally:
-        reply.complete = complete
-        reply.in_progress = False
-        reply.save(update_fields=("complete", "in_progress"))
+        with transaction.atomic():
+            reply.complete = complete
+            reply.in_progress = False
+            reply.save(update_fields=("complete", "in_progress"))
+            submission.active = False
+            submission.save(update_fields=("active",))
 
     result = {"done": True} if complete else {"error": error}
     yield json.dumps(result) + "\n"
 
 
-def reply_response(reply, route_id):
-    context = list(
-        reply.conversation.messages.filter(complete=True)
-        .annotate(turn_order=Coalesce("prompt_id", "pk"))
-        .filter(turn_order__lte=reply.prompt_id)
-        .order_by("turn_order", "pk")
-        .values("role", "content")
-    )
-    response = StreamingHttpResponse(
-        stream_message(reply, context, route_id), content_type="application/x-ndjson"
-    )
-    response["X-Conversation-Id"] = str(reply.conversation_id)
-    response["Location"] = reverse("chat-history", args=(reply.conversation_id,))
+def reply_response(submission, route_id, max_response_characters):
+    content = stream_message(submission, route_id, max_response_characters)
+    next(content)
+    response = StreamingHttpResponse(content, content_type="application/x-ndjson")
+    conversation_id = submission.reply.conversation_id
+    response["X-Conversation-Id"] = str(conversation_id)
+    response["Location"] = reverse("chat-history", args=(conversation_id,))
     return response
 
 
-def gateway_configured(route_id):
-    return all((settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, route_id))
+def start_submission(request, identity, create_reply):
+    route_id = ChatRoute.active_id()
+    if not all((settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, route_id)):
+        return JsonResponse({"error": "The model gateway is not configured."}, status=503)
+    provided_key = request.POST.get("submission_id") or request.headers.get("Idempotency-Key")
+    try:
+        key = UUID(provided_key) if provided_key else uuid4()
+    except ValueError:
+        return JsonResponse({"error": "Invalid submission ID."}, status=400)
+    fingerprint = sha256(json.dumps(identity).encode()).hexdigest()
+    try:
+        submission, response_limit = admit(request.user, key, fingerprint, create_reply)
+    except AdmissionDenied as failure:
+        return JsonResponse({"error": str(failure)}, status=failure.status)
+    if response_limit is None:
+        location = reverse("chat-history", args=(submission.reply.conversation_id,))
+        return HttpResponse(status=204, headers={"Location": location})
+    return reply_response(submission, route_id, response_limit)
 
 
 @never_cache
@@ -96,19 +133,14 @@ def send(request, conversation_id=None):
     text = request.POST.get("message", "").strip()
     if not text:
         return JsonResponse({"error": "Enter a message."}, status=400)
-    route_id = ChatRoute.active_id()
-    if not gateway_configured(route_id):
-        return JsonResponse({"error": "The model gateway is not configured."}, status=503)
-
-    with transaction.atomic():
-        if conversation is None:
-            conversation = conversations.create(owner=request.user, title=text[:100])
-        prompt = conversation.messages.create(role=Message.Role.USER, content=text)
-        reply = conversation.messages.create(
+    def create_reply():
+        target = conversation or conversations.create(owner=request.user, title=text[:100])
+        prompt = target.messages.create(role=Message.Role.USER, content=text)
+        return target.messages.create(
             prompt=prompt, role=Message.Role.ASSISTANT, complete=False, in_progress=True
         )
 
-    return reply_response(reply, route_id)
+    return start_submission(request, ("send", conversation_id, text), create_reply)
 
 
 @never_cache
@@ -123,19 +155,14 @@ def retry(request, conversation_id, reply_id):
         role=Message.Role.ASSISTANT,
         prompt__isnull=False,
     )
-    if attempt.complete or attempt.in_progress or attempt.prompt.replies.filter(pk__gt=attempt.pk).exists():
-        return JsonResponse({"error": "Reload the conversation for the latest reply."}, status=409)
-    route_id = ChatRoute.active_id()
-    if not gateway_configured(route_id):
-        return JsonResponse({"error": "The model gateway is not configured."}, status=503)
-    try:
-        with transaction.atomic():
-            reply = attempt.conversation.messages.create(
-                prompt_id=attempt.prompt_id,
-                role=Message.Role.ASSISTANT,
-                complete=False,
-                in_progress=True,
-            )
-    except IntegrityError:
-        return JsonResponse({"error": "A reply already exists for this message."}, status=409)
-    return reply_response(reply, route_id)
+    def create_reply():
+        if attempt.complete or attempt.in_progress or attempt.prompt.replies.filter(pk__gt=attempt.pk).exists():
+            raise AdmissionDenied("Reload the conversation for the latest reply.", 409)
+        return attempt.conversation.messages.create(
+            prompt_id=attempt.prompt_id,
+            role=Message.Role.ASSISTANT,
+            complete=False,
+            in_progress=True,
+        )
+
+    return start_submission(request, ("retry", conversation_id, reply_id), create_reply)

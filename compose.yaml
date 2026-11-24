@@ -5,6 +5,7 @@ services:
       - "127.0.0.1:${SUPERHARRY_PORT:-8000}:8000"
     environment:
       DJANGO_DATABASE_PATH: /data/db.sqlite3
+      DJANGO_TIME_ZONE: ${DJANGO_TIME_ZONE:-America/Guayaquil}
       DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
       RECOVERY_PASSWORD_FILE: /run/secrets/recovery_password
     volumes:

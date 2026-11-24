@@ -20,6 +20,10 @@ To enable model-entry administration, create a separate OmniRoute Access Token w
 
 Open **Chat routes** in Django admin to list routes visible to the inference key, test a route with a short inference request, and set the saved default used by chat. The saved selection overrides `CHAT_MODEL`. Add or update model entries by selecting an existing provider connection. OmniRoute stores these entries at provider level. Keep provider-account management, upstream credentials, OAuth, and fallback configuration in OmniRoute. Keep paid fallback disabled there.
 
+In Django admin, **Chat limits** controls the global daily submission allowance and maximum number of characters per reply. **User chat limits** overrides either value for an individual account. A blank override inherits the global value. A daily allowance of zero disables chat submissions for the applicable accounts.
+
+Daily limits reset at midnight in `DJANGO_TIME_ZONE`, which defaults to `America/Guayaquil`. A submission counts when Django attempts to send it to OmniRoute. An explicit retry is a new submission. Repeated delivery of the same browser form uses the original submission ID and reopens its conversation.
+
 The following sections specify the full deployment workflow, including the OmniRoute installer and later milestone checks.
 
 ## Provision

@@ -68,7 +68,7 @@ def provider_connections():
     ]
 
 
-def stream_reply(messages, *, route_id, max_tokens=None):
+def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None):
     payload = {"model": route_id, "messages": messages, "stream": True}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
@@ -83,6 +83,8 @@ def stream_reply(messages, *, route_id, max_tokens=None):
     )
     opener = build_opener(ProxyHandler({}), NoRedirect())
     try:
+        if on_submit is not None:
+            on_submit()
         response = opener.open(request, timeout=30)
     except HTTPError as error:
         error.close()

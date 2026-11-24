@@ -1,17 +1,20 @@
 import json
 import re
 from collections import deque
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
     def setUp(self):
-        user = get_user_model().objects.create_user(username="chat-user")
-        self.client.force_login(user)
+        self.user = get_user_model().objects.create_user(username="chat-user")
+        self.client.force_login(self.user)
         self.requests = []
         self.gateway_responses = deque()
         requests = self.requests
@@ -48,6 +51,15 @@ class ChatTests(TestCase):
             OMNIROUTE_API_KEY="test-gateway-key",
             CHAT_MODEL="test/free-model",
         ))
+
+    def configure_limits(self, daily_messages, max_response_characters):
+        admin = Client()
+        admin.force_login(get_user_model().objects.create_superuser(username="limit-owner"))
+        result = admin.post("/admin/superharry/chatlimits/1/change/", {
+            "daily_messages": daily_messages,
+            "max_response_characters": max_response_characters,
+        })
+        self.assertRedirects(result, "/admin/superharry/chatlimits/")
 
     def test_new_chat_streams_reply_from_active_model(self):
         saved = self.client.post("/memories/new/", {"content": "Private saved preference"})
@@ -113,6 +125,98 @@ class ChatTests(TestCase):
             "/login/?next=/chat/send/",
         )
         self.assertEqual(self.requests, [])
+
+    def test_daily_limit_counts_gateway_submissions_and_skips_local_rejections(self):
+        self.configure_limits(daily_messages=1, max_response_characters=100)
+        self.assertEqual(self.client.post("/chat/send/", {"message": " "}).status_code, 400)
+        first = self.client.post("/chat/send/", {"message": "Allowed"})
+        self.assertEqual([json.loads(chunk) for chunk in first.streaming_content][-1], {"done": True})
+        denied = self.client.post("/chat/send/", {"message": "Over limit"})
+        self.assertEqual(denied.status_code, 429)
+        self.assertContains(denied, "daily message limit", status_code=429)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_response_limit_caps_streamed_and_saved_characters(self):
+        self.configure_limits(daily_messages=3, max_response_characters=7)
+        reply = self.client.post("/chat/send/", {"message": "Keep it short"})
+        self.assertEqual(
+            [json.loads(chunk) for chunk in reply.streaming_content],
+            [{"text": "Hello"}, {"text": " t"}, {"done": True}],
+        )
+        history = self.client.get(reply["Location"])
+        self.assertContains(history, "<p>Hello t</p>", html=True)
+        self.assertNotContains(history, "Hello there")
+        self.assertNotContains(history, "Incomplete reply")
+
+    def test_administrator_can_override_limits_for_one_user(self):
+        self.configure_limits(daily_messages=0, max_response_characters=100)
+        account = get_user_model().objects.create_user(username="limits-admin", is_staff=True)
+        account.groups.add(Group.objects.get(name="Administrators"))
+        administrator = Client()
+        administrator.force_login(account)
+        response = administrator.post("/admin/superharry/userchatlimits/add/", {
+            "user": self.user.pk,
+            "daily_messages": 1,
+            "max_response_characters": 4,
+        })
+        self.assertRedirects(response, "/admin/superharry/userchatlimits/")
+        reply = self.client.post("/chat/send/", {"message": "My override"})
+        self.assertEqual(
+            [json.loads(chunk) for chunk in reply.streaming_content],
+            [{"text": "Hell"}, {"done": True}],
+        )
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="ordinary-limit"))
+        self.assertEqual(other.post("/chat/send/", {"message": "Default"}).status_code, 429)
+        self.assertEqual(self.client.post("/chat/send/", {"message": "Over"}).status_code, 429)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_repeated_delivery_reopens_one_submission_without_charging_twice(self):
+        self.configure_limits(daily_messages=2, max_response_characters=100)
+        page = self.client.get("/")
+        key = re.search(r'name="submission_id" value="([^"]+)"', page.content.decode())
+        self.assertIsNotNone(key)
+        form = {"message": "One submission", "submission_id": key.group(1)}
+        first = self.client.post("/chat/send/", form)
+        list(first.streaming_content)
+        repeated = self.client.post("/chat/send/", form)
+        self.assertEqual(repeated.status_code, 204)
+        self.assertEqual(repeated["Location"], first["Location"])
+        changed = self.client.post("/chat/send/", {**form, "message": "Different text"})
+        self.assertEqual(changed.status_code, 409)
+        second = self.client.post("/chat/send/", {"message": "New submission"})
+        list(second.streaming_content)
+        self.assertEqual(self.client.post("/chat/send/", {"message": "Third"}).status_code, 429)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_daily_quota_resets_at_midnight_in_the_deployment_timezone(self):
+        self.configure_limits(daily_messages=1, max_response_characters=100)
+        with self.settings(TIME_ZONE="America/Guayaquil"):
+            with patch("django.utils.timezone.now", return_value=datetime(2026, 11, 24, 4, 59, tzinfo=timezone.utc)):
+                before = self.client.post("/chat/send/", {"message": "Before midnight"})
+                list(before.streaming_content)
+                self.assertEqual(self.client.post("/chat/send/", {"message": "Too early"}).status_code, 429)
+            with patch("django.utils.timezone.now", return_value=datetime(2026, 11, 24, 5, tzinfo=timezone.utc)):
+                after = self.client.post("/chat/send/", {"message": "New quota day"})
+                self.assertEqual(after.status_code, 200)
+                list(after.streaming_content)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_active_response_blocks_another_send_until_it_closes(self):
+        self.configure_limits(daily_messages=1, max_response_characters=100)
+        pending = self.client.post("/chat/send/", {"message": "Reserved but not streamed"})
+        self.addCleanup(pending.close)
+        self.assertTrue(pending.streaming)
+        denied = self.client.post("/chat/send/", {"message": "Overlapping submission"})
+        self.assertEqual(denied.status_code, 409)
+        self.assertContains(denied, "already in progress", status_code=409)
+        self.assertEqual(self.requests, [])
+        pending.close()
+
+        allowed = self.client.post("/chat/send/", {"message": "After cancellation"})
+        self.assertEqual(allowed.status_code, 200)
+        list(allowed.streaming_content)
+        self.assertEqual(len(self.requests), 1)
 
     def test_interrupted_reply_can_be_retried_explicitly(self):
         self.gateway_responses.append(

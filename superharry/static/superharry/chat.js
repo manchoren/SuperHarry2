@@ -55,10 +55,14 @@ async function submitChat(event) {
       const error = await response.json().catch(() => ({}));
       throw new Error(error.error || "Your message could not be sent.");
     }
+    const location = response.headers.get("Location");
+    if (response.status === 204 && location) {
+      window.location.assign(location);
+      return;
+    }
     if (!response.headers.get("Content-Type")?.startsWith("application/x-ndjson")) {
       throw new Error("Sign in again to continue.");
     }
-    const location = response.headers.get("Location");
     historyLink.href = location;
     historyLink.hidden = false;
     if (sendingMessage) {
