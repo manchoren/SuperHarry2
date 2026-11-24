@@ -57,3 +57,30 @@ Let users send images to the agent. If the selected model cannot accept images, 
 **Idea**
 
 Review OpenAI's current ChatGPT web interface for inspiration. Refresh SuperHarry's CSS, typography, and dark mode with a visual style of its own.
+
+### implement tool system
+
+- [ ] Implemented
+
+**Idea**
+
+use standarized tool system for the model (if sopported)
+
+### create some skills 
+
+- [ ] Implemented
+
+**Idea**
+
+add skill to convert to pdf with a python script already work. also the same but from a docx.
+and also implement the "C:\tools\imagesparser" script has a skill.
+also, implement a "C:\tools\csvimages" skill so the agent can download images with a csv provided.
+t
+
+### give the user access to a sandboxed file
+
+- [ ] Implemented
+
+**Idea**
+
+give the agent the hability to show the user a file of is sandbox (so for example, the user can download the converted pdf from a docx)

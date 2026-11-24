@@ -1,6 +1,6 @@
 # Milestones and acceptance
 
-All milestones are pending. Record Docker suite, VM smoke test, and live provider results separately.
+Docker suite, VM smoke test, and live provider results are recorded separately below.
 
 ## 1. Chat and administration
 
@@ -29,7 +29,9 @@ All milestones are pending. Record Docker suite, VM smoke test, and live provide
 
 - The 33-test Django suite and Compose smoke test passed on Windows and on Debian 13 ARM64. The controlled gateway covers streamed chat, route administration, credential separation, and saved-memory opt-in.
 - The private OmniRoute 3.8.53 deployment verified the exact canonical OpenRouter Gemma free route on Windows and Debian 13 ARM64. The VM passed administrator and regular sign-in, a Django admin route change, and a real gateway denial of management access with the inference credential. A controlled streamed reply, the user account, and the admin-selected route survived a Django restart and provisioning rerun.
-- Live OpenRouter validation remains pending. OmniRoute returned a rate-limit or cooldown error for both tested Gemma free variants. The application surfaced the sanitized error and made no paid fallback request.
+- A browser-facing HTTP smoke test through Django and OmniRoute previously received a sanitized rate-limit error from the seeded free route and reopened the saved conversation with an incomplete reply. A direct request to the same model returned HTTP 429. The controlled Django suite verifies that free-route failures do not trigger fallback.
+- On 2026-11-24, a separate live HTTP smoke run on the dedicated Debian 13 ARM64 VM streamed one text fragment through OmniRoute on `openrouter/google/gemma-4-26b-a4b-it:free`, received a completion event, and reopened the saved conversation. The run used a temporary Django database and the provisioned gateway. All 33 Django tests and the CSV runner smoke test also passed on ARM64 against `f5e8965`.
+- A repeat live run with the strengthened smoke check verified that the streamed text appeared as the assistant reply in the reopened conversation. The 35-test Windows suite passed, including HTTP regressions for a missing saved assistant reply and a correctly escaped saved reply.
 
 ### CSV runner
 

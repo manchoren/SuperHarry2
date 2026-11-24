@@ -44,7 +44,7 @@ Run `python3 -m tests.csv_runner_smoke` with Docker access on the dedicated Linu
 
 1. Run the Docker test suite with its controlled gateway fixture.
 2. In the guest, sign in as a regular user and an administrator. Verify conversation persistence after restarting Django and change the default through Django admin. Confirm that the inference credential cannot call management endpoints.
-3. Run a separate live streaming chat against the seeded OpenRouter Gemma free route through OmniRoute. Record the configured route, result, and any sanitized error. Verify that an unavailable free route surfaces a user-visible error without switching to a paid route.
+3. Run `docker exec <django-container> python -m tests.live_chat_smoke` against the provisioned deployment, substituting the actual Django container name. It signs in over HTTP using the mounted recovery secret and sends a synthetic prompt only when the chat shows the seeded OpenRouter free route. Exit status `0` means the streamed text appeared as the assistant reply in the reopened conversation. Exit status `2` records an unavailable route and a saved incomplete reply. Keep live completion pending in that case.
 4. Rerun provisioning after an administrator changes the default and verify that the configured route and persistent state survive. Before releasing bundled execution, run the sandbox checks in the dedicated Linux guest.
 
 See [milestones and acceptance](milestones.md) for the complete checks and [architecture](architecture.md) for role and credential boundaries.
