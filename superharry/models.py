@@ -9,6 +9,7 @@ from django.utils import timezone
 class Conversation(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=100)
+    memory_enabled = models.BooleanField(default=False)
 
 
 class ChatRoute(models.Model):
@@ -54,6 +55,17 @@ class SavedMemory(models.Model):
 
     class Meta:
         ordering = ("-pk",)
+
+
+class CsvFile(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    payload = models.BinaryField()
+
+
+class CsvSummary(models.Model):
+    file = models.OneToOneField(CsvFile, on_delete=models.CASCADE, related_name="summary")
+    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
 
 class Message(models.Model):

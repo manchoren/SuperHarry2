@@ -24,21 +24,25 @@ In Django admin, **Chat limits** controls the global daily submission allowance 
 
 Daily limits reset at midnight in `DJANGO_TIME_ZONE`, which defaults to `America/Guayaquil`. A submission counts when Django attempts to send it to OmniRoute. An explicit retry is a new submission. Repeated delivery of the same browser form uses the original submission ID and reopens its conversation.
 
-The following sections specify the full deployment workflow, including the OmniRoute installer and later milestone checks.
-
 ## Provision
 
-1. Run the same Compose application and test setup used on the Windows development machine in a dedicated Linux guest. Use the pinned Debian Sid base for Django and a tested OmniRoute version. Attach persistent volumes for Django's SQLite database and OmniRoute state.
-2. Have the VM creation script install and start OmniRoute on a private service network. Bind the Django app to localhost for owner access. Keep the management interface private.
-3. Supply the Nous Portal API key as an installer secret. Have the installer configure the upstream connection directly in OmniRoute and seed the `upstage/solar-mini4:free` route as the initial default. Verify the canonical route ID against the installed gateway.
-4. Have the installer provision separate inference and management credentials and deliver them to Django through deployment secrets. Do not print credentials or include them in source control, browser responses, or runner jobs.
-5. Apply Django migrations, bootstrap the recovery superuser, and start Django. On reruns, create or repair missing configuration, preserve existing routes and administrator choices, and report the active default. A live provider outage does not prevent Django and OmniRoute from starting.
+Run `python scripts/provision.py` from the checkout on a Docker Compose host or in the dedicated Linux VM. Use `python3` where appropriate. The script starts the pinned OmniRoute image on the Compose network without a published port, starts Django on host loopback, and stores gateway and SQLite state in separate volumes.
+
+The script accepts `OPENROUTER_API_KEY`, `GROQ_API_KEY`, and `GEMINI_API_KEY` from the process environment or an installer-only `.env` file. Use `--provider-env-file` for another file path or `--provider-env-file -` to read assignments from standard input. Provider keys go directly to OmniRoute. OpenRouter's `google/gemma-4-26b-a4b-it:free` is the initial route candidate. The script reports whether that canonical route appears in the gateway catalog and leaves live verification pending if it cannot resolve it.
+
+The installer generates local deployment secrets, including the recovery password, under `.secrets` by default. Use `--secrets-dir` to choose another private directory. It provisions distinct inference and management credentials, applies migrations, and reports the effective Django route. Reruns keep persistent data, existing provider connections, and the administrator's saved default. A provider outage or missing provider key leaves the services available.
+
+### Isolated CSV summaries
+
+On a Linux Docker host, create a dedicated spool directory writable by Django's UID 10001 with access limited to that UID and the host operator. Set `CSV_SPOOL_DIRECTORY` to its absolute path before running the provisioner, or add `-f compose.csv.yaml` to a manual Django Compose invocation. Build the worker with `docker build --target csv-worker -t superharry-csv-worker:local .`.
+
+Run `python3 scripts/run_csv_jobs.py --spool "$CSV_SPOOL_DIRECTORY"` as a host operator with Docker access. Django queues only owner-approved CSV files. The processor launches a disposable unprivileged container per job with no network, no host mounts, and bounded resources. The owner can reopen the job page to view and download the result.
 
 ## Verify
 
 1. Run the Docker test suite with its controlled gateway fixture.
 2. In the guest, sign in as a regular user and an administrator. Verify conversation persistence after restarting Django and change the default through Django admin. Confirm that the inference credential cannot call management endpoints.
-3. Run a separate live streaming chat against the seeded free route through OmniRoute. Record the configured route, result, and any sanitized error. Verify that an unavailable free route surfaces a user-visible error without switching to a paid route.
+3. Run a separate live streaming chat against the seeded OpenRouter Gemma free route through OmniRoute. Record the configured route, result, and any sanitized error. Verify that an unavailable free route surfaces a user-visible error without switching to a paid route.
 4. Rerun provisioning after an administrator changes the default and verify that the configured route and persistent state survive. Before releasing bundled execution, run the sandbox checks in the dedicated Linux guest.
 
 See [milestones and acceptance](milestones.md) for the complete checks and [architecture](architecture.md) for role and credential boundaries.

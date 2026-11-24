@@ -16,7 +16,7 @@ Provide global daily message and maximum response length limits with optional pe
 
 ## Model gateway
 
-Django sends streaming inference requests to OmniRoute's OpenAI-compatible chat endpoint. OmniRoute owns provider connections, upstream credentials, the model catalog, routing, and upstream quotas. The VM installer seeds the Nous Portal route for `upstage/solar-mini4:free`. The deployed route ID comes from OmniRoute. Free mode uses the configured free route and surfaces unavailability or quota exhaustion. Paid fallback is disabled.
+Django sends streaming inference requests to OmniRoute's OpenAI-compatible chat endpoint. OmniRoute owns provider connections, upstream credentials, the model catalog, routing, and upstream quotas. The installer seeds the OpenRouter route for `google/gemma-4-26b-a4b-it:free` and verifies its canonical ID against OmniRoute. Groq and Gemini can be provisioned as additional connections. Free mode uses the configured free route and surfaces unavailability or quota exhaustion. Paid fallback is disabled.
 
 Django admin lists available routes, adds or updates model entries on existing provider connections, tests a route, and changes the default. Use the OmniRoute dashboard for provider account creation, upstream credentials, and OAuth. Keep separate server-side inference and management credentials. Use the smallest management scope supported by the selected OmniRoute version and limit the Django actions that can use it. [OmniRoute API reference](https://github.com/cheaper-inference/OmniRoute/wiki/API-Reference) · [Management authentication](https://github.com/cheaper-inference/OmniRoute/wiki/Management-Auth)
 

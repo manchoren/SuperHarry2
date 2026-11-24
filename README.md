@@ -8,4 +8,6 @@ SuperHarry2 is a planned Django chat application with a conversation sidebar, a 
 
 The Django recovery service can be started with Docker Compose using the [VM and Docker runbook](docs/vm-runbook.md#start-the-django-recovery-service). The milestone document tracks the remaining product acceptance checks.
 
+To provision Django and a private OmniRoute gateway, set the provider variables listed in [.env.example](.env.example) in a local `.env` file and run `python scripts/provision.py`. See [Provision](docs/vm-runbook.md#provision) for deployment options.
+
 In Django admin, the recovery superuser can create users and delegate regular account management. To delegate, enable `Staff status` on the user and add them to the `Administrators` group. Group membership and privilege grants are managed by the superuser.

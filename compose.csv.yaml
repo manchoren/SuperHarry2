@@ -1,0 +1,8 @@
+services:
+  django:
+    environment:
+      CSV_SPOOL: /csv-jobs
+    volumes:
+      - type: bind
+        source: ${CSV_SPOOL_DIRECTORY:?Set the dedicated CSV spool directory}
+        target: /csv-jobs

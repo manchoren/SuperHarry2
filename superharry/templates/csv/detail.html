@@ -1,0 +1,29 @@
+{% extends "memories/base.html" %}
+{% block title %}CSV summary{% endblock %}
+{% block content %}
+  <h1>CSV summary</h1>
+  <p>{{ record.name }}</p>
+  {% if result.status == "complete" %}
+    <p>Data rows: {{ result.summary.rows }}</p>
+    <ul>
+      {% for column in result.summary.columns %}
+        <li>{{ column.name }} ({{ column.empty }} empty cells)</li>
+      {% endfor %}
+    </ul>
+    <a href="{% url 'csv-download' record.pk %}">Download summary</a>
+  {% elif result %}
+    <p role="status">{% if result.status == "timeout" %}The summary timed out.{% else %}The CSV could not be summarized.{% endif %}</p>
+  {% elif job %}
+    <p role="status">An approved summary is queued or running.</p>
+    <a href="{% url 'csv-detail' record.pk %}">Refresh status</a>
+  {% endif %}
+  {% if runner_configured and not result %}
+    <form method="post" action="{% url 'csv-approve' record.pk %}">
+      {% csrf_token %}
+      <button name="confirm" value="yes" type="submit">Approve summary for this file</button>
+    </form>
+  {% elif not runner_configured %}
+    <p>The CSV runner is unavailable.</p>
+  {% endif %}
+  <a href="{% url 'csv-upload' %}">Choose another file</a>
+{% endblock %}

@@ -1,0 +1,32 @@
+services:
+  omniroute:
+    image: cheaperinference/omniroute:3.8.53@sha256:b52a17661a1aff42ffb78f349f423e986dfc55b57274f28559f8387622ef8ee4
+    environment:
+      DATA_DIR: /app/data
+      REQUIRE_API_KEY: "true"
+      OMNIROUTE_EMERGENCY_FALLBACK: "false"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        export INITIAL_PASSWORD="$$(tr -d '\r\n' < /run/secrets/omniroute_initial_password)"
+        export JWT_SECRET="$$(tr -d '\r\n' < /run/secrets/omniroute_jwt_secret)"
+        export API_KEY_SECRET="$$(tr -d '\r\n' < /run/secrets/omniroute_api_key_secret)"
+        exec node dev/run-standalone.mjs
+    secrets:
+      - omniroute_initial_password
+      - omniroute_jwt_secret
+      - omniroute_api_key_secret
+    volumes:
+      - omniroute_data:/app/data
+
+secrets:
+  omniroute_initial_password:
+    file: ${OMNIROUTE_INITIAL_PASSWORD_PATH:-.secrets/omniroute_initial_password}
+  omniroute_jwt_secret:
+    file: ${OMNIROUTE_JWT_SECRET_PATH:-.secrets/omniroute_jwt_secret}
+  omniroute_api_key_secret:
+    file: ${OMNIROUTE_API_KEY_SECRET_PATH:-.secrets/omniroute_api_key_secret}
+
+volumes:
+  omniroute_data:

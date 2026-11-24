@@ -11,6 +11,7 @@
 <body>
   <aside>
     <a href="{% url 'memories' %}">Saved memories</a>
+    <a href="{% url 'csv-upload' %}">Summarize a CSV</a>
     <nav aria-label="Conversations">
       <a href="{% url 'chat' %}">New chat</a>
       <ul>
@@ -49,11 +50,29 @@
     </section>
     <p id="chat-status" role="status"></p>
     <p><a id="chat-history" hidden>Open saved conversation</a></p>
+    {% if conversation %}
+      <form method="post" action="{% url 'chat-memory' conversation.pk %}">
+        {% csrf_token %}
+        <label>
+          <input type="checkbox" name="memory_enabled"{% if conversation.memory_enabled %} checked{% endif %}>
+          Include relevant saved memories in model requests
+        </label>
+        <button type="submit">Save memory setting</button>
+        <small>Memory is {% if conversation.memory_enabled %}on{% else %}off{% endif %}</small>
+      </form>
+    {% endif %}
     <form id="composer" method="post" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
       {% csrf_token %}
       <input type="hidden" name="submission_id" value="{{ submission_id }}">
+      {% if not conversation %}
+        <label>
+          <input type="checkbox" name="memory_enabled">
+          Include relevant saved memories in model requests
+        </label>
+      {% endif %}
       <label for="message">Message</label>
       <textarea id="message" name="message" rows="3" required></textarea>
+      <small>Use <code>/summarize</code> followed by text to summarize it.</small>
       <button type="submit">Send</button>
     </form>
   </main>

@@ -101,7 +101,13 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None):
             if data == b"[DONE]":
                 return
             event = json.loads(data)
-            if event.get("error"):
+            error = event.get("error")
+            if isinstance(error, dict) and (
+                error.get("type") == "rate_limit_error"
+                or error.get("code") in ("model_cooldown", "rate_limit_exceeded", "insufficient_quota")
+            ):
+                raise GatewayFailure("The free route has exhausted its quota or rate limit.")
+            if error:
                 break
             choices = event.get("choices")
             if choices:

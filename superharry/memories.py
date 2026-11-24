@@ -1,4 +1,7 @@
+import re
+
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models.functions import Substr
 from django.http import Http404, HttpResponseRedirect
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
@@ -6,6 +9,22 @@ from django.views.decorators.cache import never_cache
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
 from .models import SavedMemory
+
+
+def relevant_memory_excerpts(owner_id, prompt):
+    terms = set(re.findall(r"\b[^\W\d_]{3,}\b", prompt[:4000].casefold()))
+    if not terms:
+        return []
+    candidates = SavedMemory.objects.filter(owner_id=owner_id).values_list(
+        Substr("content", 1, 1000), flat=True
+    )[:100]
+    scored = []
+    for excerpt in candidates:
+        words = set(re.findall(r"\b[^\W\d_]{3,}\b", excerpt.casefold()))
+        if matches := len(terms & words):
+            scored.append((matches, excerpt))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [excerpt for _, excerpt in scored[:3]]
 
 
 @method_decorator(never_cache, name="dispatch")

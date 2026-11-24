@@ -126,6 +126,48 @@ class ChatTests(TestCase):
         )
         self.assertEqual(self.requests, [])
 
+    def test_saved_memory_is_opt_in_and_scoped_to_one_conversation_and_owner(self):
+        self.client.post("/memories/new/", {"content": "Coffee should be served black."})
+        self.client.post("/memories/new/", {"content": "Prefer window seats."})
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="another-memory-owner"))
+        other.post("/memories/new/", {"content": "Coffee with another account's secret."})
+
+        first = self.client.post("/chat/send/", {"message": "What coffee do I prefer?"})
+        list(first.streaming_content)
+        history = first["Location"]
+        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+
+        self.assertEqual(other.post(f"{history}memory/", {"memory_enabled": "on"}).status_code, 404)
+        self.assertRedirects(
+            self.client.post(f"{history}memory/", {"memory_enabled": "on"}), history
+        )
+        self.assertContains(self.client.get(history), "Memory is on")
+        followup = self.client.post(f"{history}send/", {"message": "Coffee again?"})
+        list(followup.streaming_content)
+        outbound = json.dumps(self.requests[-1][2])
+        self.assertIn("Coffee should be served black.", outbound)
+        self.assertNotIn("window seats", outbound)
+        self.assertNotIn("another account", outbound)
+
+        separate = self.client.post("/chat/send/", {"message": "Coffee in a separate chat"})
+        list(separate.streaming_content)
+        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+
+    def test_text_skill_is_invoked_without_tools(self):
+        self.assertContains(self.client.get("/"), "/summarize")
+        response = self.client.post("/chat/send/", {"message": "/summarize First draft notes"})
+        self.assertEqual(
+            [json.loads(chunk) for chunk in response.streaming_content][-1], {"done": True}
+        )
+        outbound = self.requests[-1][2]
+        self.assertNotIn("tools", outbound)
+        self.assertEqual(outbound["messages"][-1], {"role": "user", "content": "First draft notes"})
+        self.assertIn("Summarize the user", outbound["messages"][0]["content"])
+        history = self.client.get(response["Location"])
+        self.assertContains(history, "/summarize First draft notes")
+        self.assertContains(history, "Hello there")
+
     def test_daily_limit_counts_gateway_submissions_and_skips_local_rejections(self):
         self.configure_limits(daily_messages=1, max_response_characters=100)
         self.assertEqual(self.client.post("/chat/send/", {"message": " "}).status_code, 400)
@@ -254,12 +296,18 @@ class ChatTests(TestCase):
         self.assertEqual(len(self.requests), 2)
 
     def test_free_route_failures_are_reported_without_fallback(self):
-        for status, expected in (
-            (429, "The free route has exhausted its quota or rate limit."),
-            (503, "The free route is currently unavailable."),
+        http_error = b'{"error":"private upstream details"}'
+        for status, body, expected in (
+            (429, http_error, "The free route has exhausted its quota or rate limit."),
+            (503, http_error, "The free route is currently unavailable."),
+            (
+                200,
+                b'data: {"error":{"code":"model_cooldown","type":"rate_limit_error"}}\n\n',
+                "The free route has exhausted its quota or rate limit.",
+            ),
         ):
             with self.subTest(status=status):
-                self.gateway_responses.append((status, b'{"error":"private upstream details"}'))
+                self.gateway_responses.append((status, body))
                 previous = len(self.requests)
                 response = self.client.post("/chat/send/", {"message": "Hello"})
                 self.assertEqual(
