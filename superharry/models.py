@@ -69,6 +69,13 @@ class CsvSummary(models.Model):
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
 
+class ChatInput(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    media_type = models.CharField(max_length=32)
+    payload = models.BinaryField()
+
+
 class Message(models.Model):
     class Role(models.TextChoices):
         USER = "user", "User"
@@ -127,6 +134,7 @@ class Schedule(models.Model):
     repetition = models.CharField(max_length=8)
     wall_time = models.TimeField(null=True, blank=True)
     weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    input_ids = models.JSONField(default=list, blank=True)
     preferred_model = models.CharField(max_length=255, blank=True)
     canceled = models.BooleanField(default=False)
 

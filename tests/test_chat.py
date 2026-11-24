@@ -1,4 +1,5 @@
 import json
+import base64
 import re
 from collections import deque
 from datetime import datetime, timezone
@@ -10,10 +11,103 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_model_cannot_schedule_another_users_input(self):
+        from superharry.models import ChatInput
+
+        other = get_user_model().objects.create_user(username="other")
+        item = ChatInput.objects.create(owner=other, name="private.txt", media_type="text/plain", payload=b"hidden")
+        arguments = json.dumps({"prompt": "Review", "due_at": "2099-01-01T12:00:00Z", "input_ids": [item.pk]})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Schedule a review"})
+        notice = b"".join(response.streaming_content).decode()
+        self.assertIn("could not be created", notice)
+        self.assertNotIn("private.txt", notice)
+        self.assertNotIn("hidden", notice)
+        self.assertEqual(self.client.post(f"/inputs/{item.pk}/delete/").status_code, 404)
+
+    def test_scheduled_image_is_sent_to_the_gateway_as_image_input(self):
+        from superharry.models import ChatInput
+
+        png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7nFQAAAABJRU5ErkJggg==")
+        self.client.post("/inputs/", {"file": SimpleUploadedFile("pixel.png", png, content_type="image/png")})
+        selected = ChatInput.objects.get(owner=self.user)
+        arguments = json.dumps({"prompt": "Inspect this image", "due_at": "2099-01-01T12:00:00Z", "input_ids": [selected.pk]})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Inspect the uploaded image later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        outbound = json.dumps(self.requests[-1][2])
+        self.assertIn("data:image/png;base64," + base64.b64encode(png).decode(), outbound)
+
+    def test_schedule_reports_input_that_changed_ownership_without_exposing_contents(self):
+        from superharry.models import ChatInput, Conversation, Schedule
+
+        other = get_user_model().objects.create_user(username="other")
+        item = ChatInput.objects.create(owner=self.user, name="private.txt", media_type="text/plain", payload=b"Private secret content")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once",
+            preferred_model="test/free-model", input_ids=[item.pk])
+        item.owner = other
+        item.save(update_fields=("owner",))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(self.requests, [])
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, f"input #{item.pk} is missing or inaccessible")
+        self.assertNotContains(page, "Private secret content")
+        self.assertNotContains(page, "private.txt")
+
+    def test_schedule_reports_a_deleted_input(self):
+        from superharry.models import ChatInput, Conversation, Schedule
+
+        item = ChatInput.objects.create(owner=self.user, name="report.txt", media_type="text/plain", payload=b"report")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once",
+            preferred_model="test/free-model", input_ids=[item.pk])
+        item_id = item.pk
+        item.delete()
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(self.requests, [])
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), f"input #{item_id} is missing or inaccessible")
+
+    def test_scheduled_run_receives_only_the_selected_owned_input(self):
+        from superharry.models import ChatInput
+
+        self.client.post("/inputs/", {"file": SimpleUploadedFile("report.txt", b"Quarterly report", content_type="text/plain")})
+        selected = ChatInput.objects.get(owner=self.user)
+        arguments = json.dumps({"prompt": "Review the selected report", "due_at": "2099-01-01T12:00:00Z", "input_ids": [selected.pk]})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Review the uploaded report later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        outbound = json.dumps(self.requests[-1][2], ensure_ascii=False)
+        self.assertIn("Quarterly report", outbound)
+        self.assertIn("Review the selected report", outbound)
+        self.assertContains(self.client.get(response["Location"]), "Hello there")
+
+    def test_user_can_upload_a_private_text_input_for_scheduled_work(self):
+        upload = SimpleUploadedFile("report.txt", b"Quarterly report", content_type="text/plain")
+        response = self.client.post("/inputs/", {"file": upload})
+        self.assertEqual(response.status_code, 302)
+        page = self.client.get("/inputs/")
+        self.assertContains(page, "report.txt")
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="other"))
+        self.assertNotContains(other.get("/inputs/"), "report.txt")
+
     def test_completed_one_time_schedule_releases_its_limit_slot(self):
         from superharry.models import ChatLimits, Conversation, Schedule
 

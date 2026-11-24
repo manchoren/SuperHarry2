@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from .chat import stream_message
 from .gateway import GatewayFailure, available_routes
-from .models import ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
+from .models import ChatInput, ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
 from .schedule_time import next_occurrence
 from .text_skills import text_skill
@@ -160,6 +160,17 @@ def _run_due():
             advance_schedule(occurrence)
             continue
 
+        selected = {item.pk: item for item in ChatInput.objects.filter(owner=schedule.owner, pk__in=schedule.input_ids)}
+        missing = next((item for item in schedule.input_ids if item not in selected), None)
+        if missing is not None:
+            occurrence.reply = schedule.conversation.messages.create(
+                role=Message.Role.ASSISTANT, content=f"Scheduled task failed: input #{missing} is missing or inaccessible.",
+            )
+            occurrence.status = "failed"
+            occurrence.save(update_fields=("reply", "status"))
+            advance_schedule(occurrence)
+            continue
+
         def create_reply():
             if not Schedule.objects.filter(pk=schedule.pk, canceled=False, owner_id=schedule.conversation.owner_id).exists():
                 raise AdmissionDenied("The schedule is canceled or unavailable.", 409)
@@ -188,7 +199,7 @@ def _run_due():
         occurrence.reply = submission.reply
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
-        for _ in stream_message(submission, route, limit, skill, scheduled=True):
+        for _ in stream_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
             pass
         submission.reply.refresh_from_db()
         occurrence.status = "complete" if submission.reply.complete else "interrupted"
