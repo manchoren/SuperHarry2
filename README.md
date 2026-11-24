@@ -7,3 +7,5 @@ SuperHarry2 is a planned Django chat application with a conversation sidebar, a 
 - [VM and Docker runbook](docs/vm-runbook.md)
 
 The Django recovery service can be started with Docker Compose using the [VM and Docker runbook](docs/vm-runbook.md#start-the-django-recovery-service). The milestone document tracks the remaining product acceptance checks.
+
+In Django admin, the recovery superuser can create users and delegate regular account management. To delegate, enable `Staff status` on the user and add them to the `Administrators` group. Group membership and privilege grants are managed by the superuser.
