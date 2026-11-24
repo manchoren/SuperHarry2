@@ -96,6 +96,21 @@ class SkillCatalogTests(TestCase):
         self.client.force_login(other)
         self.assertContains(self.client.get("/skills/draft-report/"), "Write a report")
 
+    def test_owner_can_save_scripts_and_dependencies_for_other_users_to_inspect(self):
+        owner = get_user_model().objects.create_user(username="owner")
+        other = get_user_model().objects.create_user(username="other")
+        self.client.force_login(owner)
+        response = self.client.post("/skills/new/", {
+            "name": "pdf-report", "purpose": "Create a PDF", "instructions": "Use the script",
+            "files": '{"render.py": "print(123)"}', "dependencies": '["reportlab==4.0.0"]',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.client.force_login(other)
+        detail = self.client.get("/skills/pdf-report/")
+        self.assertContains(detail, "render.py")
+        self.assertContains(detail, "print(123)")
+        self.assertContains(detail, "reportlab==4.0.0")
+
     def test_catalog_marks_a_collision_introduced_by_a_repository_update(self):
         self.client.force_login(get_user_model().objects.create_user(username="owner"))
         with TemporaryDirectory() as directory, patch("superharry.skill_views.SKILLS_DIRECTORY", Path(directory)):

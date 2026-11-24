@@ -34,6 +34,10 @@ The script accepts `OPENROUTER_API_KEY`, `GROQ_API_KEY`, and `GEMINI_API_KEY` fr
 
 The installer generates local deployment secrets, including the recovery password, under `.secrets` by default. Use `--secrets-dir` to choose another private directory. It provisions distinct inference and management credentials, applies migrations, and reports the effective Django route. Reruns keep persistent data, existing provider connections, and the administrator's saved default. A provider outage or missing provider key leaves the services available.
 
+For an already provisioned installation, run `python scripts/deploy.py` from the checkout to rebuild and restart Django and the scheduler. The script uses `.secrets/omniroute_default_route` unless `CHAT_MODEL` is set and keeps the existing Compose volumes. It waits until Django responds and both services are running. For a non-default gateway set `OMNIROUTE_URL`; set `CSV_SPOOL_DIRECTORY` before running it if the installation uses the CSV spool overlay.
+
+Run `python scripts/deploy.py --watch` to deploy once and then redeploy whenever the application, tests, Dockerfile, requirements, or Compose files change. Stop the watcher with Ctrl+C. Every deployment restarts Django and can interrupt active replies; use this mode when that behavior is appropriate.
+
 ### Isolated CSV summaries
 
 On a Linux Docker host, create a dedicated spool directory writable by Django's UID 10001 with access limited to that UID and the host operator. Set `CSV_SPOOL_DIRECTORY` to its absolute path before running the provisioner, or add `-f compose.csv.yaml` to a manual Django Compose invocation. Build the worker with `docker build --target csv-worker -t superharry-csv-worker:local .`.
