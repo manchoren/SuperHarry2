@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -43,7 +44,23 @@ def with_python(command, code):
     ]
 
 
+def check_runtime():
+    components = json.loads(subprocess.check_output(
+        ["docker", "version", "--format", "{{json .Server.Components}}"], text=True, timeout=15
+    ))
+    versions = {entry["Name"]: entry["Version"] for entry in components}
+    for component, required in (("runc", (1, 4, 3)), ("containerd", (2, 3, 6))):
+        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?", versions.get(component, ""))
+        if not match or tuple(map(int, match.groups())) < required:
+            raise SystemExit(
+                f"CSV release verification requires {component} "
+                f">= {'.'.join(map(str, required))}; daemon reports {versions.get(component)}."
+            )
+    print(f"CSV runtime verified: runc {versions['runc']}, containerd {versions['containerd']}.")
+
+
 def main():
+    check_runtime()
     probe_id = uuid4()
     subprocess.run(with_python(run_csv_jobs.job_command(probe_id), PROBE), check=True, timeout=30)
     with TemporaryDirectory() as directory:

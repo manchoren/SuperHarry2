@@ -38,6 +38,8 @@ On a Linux Docker host, create a dedicated spool directory writable by Django's 
 
 Run `python3 scripts/run_csv_jobs.py --spool "$CSV_SPOOL_DIRECTORY"` as a host operator with Docker access. Django queues only owner-approved CSV files. The processor launches a disposable unprivileged container per job with no network, no host mounts, and bounded resources. The owner can reopen the job page to view and download the result.
 
+Run `python3 -m tests.csv_runner_smoke` with Docker access on the dedicated Linux VM. The smoke test expects stable Docker daemon components at or above runc `1.4.3` and containerd `2.3.6`, then exercises network denial, read-only execution, resource bounds, and disposable cleanup. The floors reflect the reviewed [runc fix](https://security-tracker.debian.org/tracker/CVE-2026-41579) and [containerd fix](https://security-tracker.debian.org/tracker/CVE-2026-53493).
+
 ## Verify
 
 1. Run the Docker test suite with its controlled gateway fixture.
