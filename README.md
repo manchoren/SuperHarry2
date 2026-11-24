@@ -6,4 +6,4 @@ SuperHarry2 is a planned Django chat application with a conversation sidebar, a 
 - [Milestones and acceptance criteria](docs/milestones.md)
 - [VM and Docker runbook](docs/vm-runbook.md)
 
-The design is approved. Implementation and runtime verification are pending.
+The Django recovery service can be started with Docker Compose using the [VM and Docker runbook](docs/vm-runbook.md#start-the-django-recovery-service). The milestone document tracks the remaining product acceptance checks.

@@ -1,0 +1,23 @@
+services:
+  django:
+    build: .
+    ports:
+      - "127.0.0.1:${SUPERHARRY_PORT:-8000}:8000"
+    environment:
+      DJANGO_DATABASE_PATH: /data/db.sqlite3
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      RECOVERY_PASSWORD_FILE: /run/secrets/recovery_password
+    volumes:
+      - django_data:/data
+    secrets:
+      - django_secret_key
+      - recovery_password
+
+volumes:
+  django_data:
+
+secrets:
+  django_secret_key:
+    file: ${DJANGO_SECRET_KEY_PATH:-.secrets/django_secret_key}
+  recovery_password:
+    file: ${RECOVERY_PASSWORD_PATH:-.secrets/recovery_password}

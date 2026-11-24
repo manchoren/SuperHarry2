@@ -1,0 +1,7 @@
+**
+!requirements.txt
+!superharry/
+!superharry/**
+!tests/
+!tests/**
+**/__pycache__/
