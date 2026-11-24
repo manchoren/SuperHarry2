@@ -2,10 +2,12 @@ import json
 import base64
 import re
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from io import StringIO
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+from tempfile import TemporaryDirectory
+from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -16,6 +18,175 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_required_decision_is_visible_even_when_response_cap_is_small(self):
+        from superharry.models import Conversation, Schedule, UserChatLimits
+
+        UserChatLimits.objects.create(user=self.user, max_response_characters=5)
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "decision-1", "function": {"name": "request_user_input", "arguments": json.dumps({"question": "Which option should I choose?"})}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.extend([(200, payload), (200, payload)])
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Which option should I choose?")
+
+    def test_tool_free_scheduled_skill_cannot_create_a_child_even_if_gateway_requests_it(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="/summarize Notes",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        arguments = json.dumps({"prompt": "Unauthorized child", "due_at": "2099-01-02T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertFalse(Schedule.objects.filter(prompt="Unauthorized child").exists())
+
+    def test_child_schedule_shares_the_owners_active_schedule_cap(self):
+        from superharry.models import ChatLimits, Conversation, Schedule
+
+        ChatLimits.objects.filter(pk=1).update(max_active_schedules=1)
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        parent = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Follow up",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="daily",
+            wall_time=time(12), preferred_model="test/free-model")
+        arguments = json.dumps({"prompt": "Child follow up", "due_at": "2099-01-03T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.append((200, payload))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertFalse(Schedule.objects.filter(prompt="Child follow up").exists())
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "active schedule limit")
+        ChatLimits.objects.filter(pk=1).update(max_active_schedules=2)
+        self.gateway_responses.append((200, payload))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 2, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertTrue(Schedule.objects.filter(prompt="Child follow up", created_by__schedule=parent).exists())
+        self.gateway_responses.append((200, payload))
+        response = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Schedule another"})
+        self.assertIn("schedule limit", b"".join(response.streaming_content).decode().lower())
+
+    def test_scheduled_run_creates_an_independent_child_visible_to_its_owner(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        parent = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Follow up",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        arguments = json.dumps({"prompt": "Child follow up", "due_at": "2099-01-02T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "child-1", "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertIn("create_schedule", [tool["function"]["name"] for tool in self.requests[-1][2]["tools"]])
+        menu = self.client.get("/schedules/")
+        self.assertContains(menu, "Child follow up")
+        self.assertContains(menu, f"Created by scheduled task #{parent.pk}")
+        child = Schedule.objects.get(prompt="Child follow up")
+        self.assertEqual(child.owner, self.user)
+        self.assertEqual(child.conversation, conversation)
+        self.client.post(f"/schedules/{parent.pk}/cancel/")
+        child.refresh_from_db()
+        self.assertFalse(child.canceled)
+        self.assertIsNotNone(child.next_run)
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="other"))
+        self.assertEqual(other.post(f"/schedules/{child.pk}/cancel/").status_code, 404)
+        self.assertEqual(self.client.post(f"/schedules/{child.pk}/cancel/").status_code, 302)
+
+    def test_scheduled_csv_approval_cannot_reference_another_owners_file(self):
+        from superharry.models import Conversation, CsvFile, CsvSummary, Schedule
+
+        other = get_user_model().objects.create_user(username="other")
+        record = CsvFile.objects.create(owner=other, name="secret.csv", payload=b"secret")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Summarize",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "approval-1", "function": {"name": "request_csv_approval", "arguments": json.dumps({"file_id": record.pk})}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.extend([(200, payload), (200, payload)])
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertNotContains(page, "secret.csv")
+        self.assertNotContains(page, f'/csv/{record.pk}/')
+        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
+
+    def test_scheduled_csv_approval_requires_the_owner_and_does_not_start_a_job(self):
+        from superharry.models import Conversation, CsvFile, CsvSummary, Schedule
+
+        record = CsvFile.objects.create(owner=self.user, name="report.csv", payload=b"value\n1\n")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Summarize the file",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        arguments = json.dumps({"file_id": record.pk})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "approval-1", "function": {"name": "request_csv_approval", "arguments": arguments}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.append((200, b'data: {"choices":[{"delta":{"content":"Prepared the summary request."}}]}\n\n' + payload))
+        self.gateway_responses.append((200, payload))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(schedule.occurrences.get().status, "needs_user_input")
+        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "Prepared the summary request.")
+        self.assertContains(page, f'/csv/{record.pk}/')
+        self.assertContains(page, "Review and approve CSV")
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="other"))
+        self.assertEqual(other.post(f"/csv/{record.pk}/approve/", {"confirm": "yes"}).status_code, 404)
+        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
+        with TemporaryDirectory() as directory, self.settings(CSV_SPOOL=directory):
+            self.assertEqual(self.client.post(f"/csv/{record.pk}/approve/", {"confirm": "yes"}).status_code, 302)
+            self.assertEqual(len(list(Path(directory).glob("*.input"))), 1)
+
+    def test_required_decision_shows_partial_work_and_keeps_daily_timetable(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="daily",
+            wall_time=time(12), preferred_model="test/free-model")
+        arguments = json.dumps({"question": "Which contract should I sign?"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "decision-1", "function": {"name": "request_user_input", "arguments": arguments}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.append((200, b'data: {"choices":[{"delta":{"content":"Prepared the report."}}]}\n\n' + payload))
+        self.gateway_responses.append((200, payload))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(schedule.occurrences.get().status, "needs_user_input")
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run, datetime(2099, 1, 2, 12, tzinfo=timezone.utc))
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "Prepared the report.")
+        self.assertContains(page, "Needs user input: Which contract should I sign?")
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 2, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(list(schedule.occurrences.order_by("due_at").values_list("status", flat=True)), ["needs_user_input", "complete"])
+
+    def test_scheduled_model_receives_unavailable_user_guidance_and_can_continue(self):
+        from superharry.models import ChatSubmission, Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        arguments = json.dumps({"question": "Which format should I use?"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "decision-1", "function": {"name": "request_user_input", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        self.gateway_responses.append((200, b'data: {"choices":[{"delta":{"content":"Used the recommended format."}}]}\n\ndata: [DONE]\n\n'))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(len(self.requests), 2)
+        messages = self.requests[-1][2]["messages"]
+        self.assertEqual(messages[-1]["role"], "tool")
+        self.assertIn("The user is unavailable right now", messages[-1]["content"])
+        self.assertEqual(schedule.occurrences.get().status, "complete")
+        self.assertEqual(ChatSubmission.objects.filter(owner=self.user, submitted_day__isnull=False).count(), 1)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Used the recommended format.")
+
     def test_model_cannot_schedule_another_users_input(self):
         from superharry.models import ChatInput
 

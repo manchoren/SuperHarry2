@@ -33,6 +33,7 @@
     {% for schedule in schedules %}
       <article>
         <strong>Scheduled task #{{ schedule.pk }}</strong>
+        {% if schedule.created_by_id %}<p>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</p>{% endif %}
         <p>{{ schedule.prompt }}</p>
         {% if schedule.repetition == "daily" %}<p>Daily</p>{% elif schedule.repetition == "weekly" %}<p>Weekly</p>{% endif %}
         {% if schedule.canceled %}<p>Canceled</p>
@@ -51,7 +52,13 @@
       {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
-          {% for occurrence in message.scheduleoccurrence_set.all %}<small>Scheduled task #{{ occurrence.schedule_id }}</small>{% endfor %}
+          {% for occurrence in message.scheduleoccurrence_set.all %}
+            <small>Scheduled task #{{ occurrence.schedule_id }}</small>
+            {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
+            {% if occurrence.approval_file_id and occurrence.approval_file.owner_id == conversation.owner_id %}
+              <a href="{% url 'csv-detail' occurrence.approval_file_id %}">Review and approve CSV</a>
+            {% endif %}
+          {% endfor %}
           <p>{{ message.content }}</p>
           {% if message.in_progress %}
             <small>Reply in progress</small>

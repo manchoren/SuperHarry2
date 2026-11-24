@@ -8,6 +8,7 @@ from tempfile import gettempdir
 from uuid import NAMESPACE_URL, uuid5
 import os
 import errno
+import json
 
 from django.conf import settings
 from django.db import transaction
@@ -199,9 +200,11 @@ def _run_due():
         occurrence.reply = submission.reply
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
-        for _ in stream_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
-            pass
+        needs_user_input = False
+        for event in stream_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
+            if event and json.loads(event).get("needs_user_input"):
+                needs_user_input = True
         submission.reply.refresh_from_db()
-        occurrence.status = "complete" if submission.reply.complete else "interrupted"
+        occurrence.status = "needs_user_input" if needs_user_input else "complete" if submission.reply.complete else "interrupted"
         occurrence.save(update_fields=("status",))
         advance_schedule(occurrence)

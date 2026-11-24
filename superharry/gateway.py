@@ -125,6 +125,10 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
                     if not isinstance(index, int) or not 0 <= index < 10:
                         raise ValueError("Invalid tool call index.")
                     call = calls.setdefault(index, {"name": "", "arguments": ""})
+                    if "id" in part:
+                        if not isinstance(part["id"], str) or len(part["id"]) > 255:
+                            raise ValueError("Invalid tool call ID.")
+                        call["id"] = part["id"]
                     function = part.get("function") or {}
                     for key in ("name", "arguments"):
                         fragment = function.get(key, "")

@@ -8,12 +8,13 @@
   {% for schedule in schedules %}
     <article>
       <h2>Scheduled task #{{ schedule.pk }}</h2>
+      {% if schedule.created_by_id %}<p>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</p>{% endif %}
       <p>{{ schedule.prompt }}</p>
       <p><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></p>
       {% if schedule.canceled %}<p>Canceled</p>
       {% elif schedule.next_run %}<p>Next: {% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
       {% else %}<p>Submitted or finished</p>{% endif %}
-      <p>Latest outcome: {{ schedule.latest_outcome|default:"None yet" }}</p>
+      <p>Latest outcome: {% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"None yet" }}{% endif %}</p>
       <p>Preferred model: {{ schedule.preferred_model|default:"Use active model" }}</p>
       {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
         <form method="post" action="{% url 'schedule-model' schedule.pk %}">

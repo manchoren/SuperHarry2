@@ -121,8 +121,9 @@ class ChatSubmission(models.Model):
         ]
 
     def mark_submitted(self):
-        self.submitted_day = timezone.localdate()
-        self.save(update_fields=("submitted_day",))
+        if self.submitted_day is None:
+            self.submitted_day = timezone.localdate()
+            self.save(update_fields=("submitted_day",))
 
 
 class Schedule(models.Model):
@@ -135,6 +136,7 @@ class Schedule(models.Model):
     wall_time = models.TimeField(null=True, blank=True)
     weekday = models.PositiveSmallIntegerField(null=True, blank=True)
     input_ids = models.JSONField(default=list, blank=True)
+    created_by = models.ForeignKey("ScheduleOccurrence", null=True, blank=True, on_delete=models.SET_NULL, related_name="children")
     preferred_model = models.CharField(max_length=255, blank=True)
     canceled = models.BooleanField(default=False)
 
@@ -149,6 +151,8 @@ class ScheduleOccurrence(models.Model):
     due_at = models.DateTimeField()
     status = models.CharField(max_length=24, default="claimed")
     reply = models.ForeignKey(Message, null=True, on_delete=models.SET_NULL)
+    approval_file = models.ForeignKey(CsvFile, null=True, blank=True, on_delete=models.SET_NULL)
+    user_request = models.TextField(blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("schedule", "due_at"), name="unique_schedule_occurrence")]
