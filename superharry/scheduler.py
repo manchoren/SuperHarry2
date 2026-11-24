@@ -35,6 +35,15 @@ def advance_schedule(occurrence):
     Schedule.objects.filter(pk=schedule.pk, canceled=False, next_run__isnull=True).update(next_run=following)
 
 
+def mark_missed(occurrence):
+    occurrence.status = "missed"
+    occurrence.reply = occurrence.schedule.conversation.messages.create(
+        role=Message.Role.ASSISTANT, content="Scheduled task missed: it could not start within one hour."
+    )
+    occurrence.save(update_fields=("reply", "status"))
+    advance_schedule(occurrence)
+
+
 @contextmanager
 def scheduler_lock():
     name = str(settings.DATABASES["default"]["NAME"])
@@ -128,13 +137,8 @@ def _run_due():
             schedule.next_run = None
             schedule.save(update_fields=("next_run",))
 
-        if now > occurrence.due_at + timedelta(hours=1):
-            occurrence.status = "missed"
-            occurrence.reply = schedule.conversation.messages.create(
-                role=Message.Role.ASSISTANT, content="Scheduled task missed: it could not start within one hour."
-            )
-            occurrence.save(update_fields=("reply", "status"))
-            advance_schedule(occurrence)
+        if timezone.now() > occurrence.due_at + timedelta(hours=1):
+            mark_missed(occurrence)
             continue
 
         try:
@@ -172,9 +176,15 @@ def _run_due():
             advance_schedule(occurrence)
             continue
 
+        if timezone.now() > occurrence.due_at + timedelta(hours=1):
+            mark_missed(occurrence)
+            continue
+
         def create_reply():
             if not Schedule.objects.filter(pk=schedule.pk, canceled=False, owner_id=schedule.conversation.owner_id).exists():
                 raise AdmissionDenied("The schedule is canceled or unavailable.", 409)
+            if timezone.now() > occurrence.due_at + timedelta(hours=1):
+                raise AdmissionDenied("The scheduled start window expired.", 410)
             prompt = schedule.conversation.messages.create(role=Message.Role.USER, content=schedule.prompt)
             return schedule.conversation.messages.create(
                 prompt=prompt, role=Message.Role.ASSISTANT, content="",
@@ -188,6 +198,8 @@ def _run_due():
                 with transaction.atomic():
                     Schedule.objects.filter(pk=schedule.pk, next_run__isnull=True, canceled=False).update(next_run=occurrence.due_at)
                     occurrence.delete()
+            elif failure.status == 410:
+                mark_missed(occurrence)
             else:
                 occurrence.status = "skipped" if failure.status == 429 else "failed"
                 occurrence.reply = schedule.conversation.messages.create(
@@ -201,10 +213,14 @@ def _run_due():
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
         needs_user_input = False
+        failure_reason = ""
         for event in stream_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
-            if event and json.loads(event).get("needs_user_input"):
-                needs_user_input = True
+            if event:
+                decoded = json.loads(event)
+                needs_user_input = needs_user_input or bool(decoded.get("needs_user_input"))
+                failure_reason = decoded.get("error", "") or failure_reason
         submission.reply.refresh_from_db()
-        occurrence.status = "needs_user_input" if needs_user_input else "complete" if submission.reply.complete else "interrupted"
-        occurrence.save(update_fields=("status",))
+        occurrence.status = "needs_user_input" if needs_user_input else "complete" if submission.reply.complete else "failed" if failure_reason and failure_reason != "The model reply was interrupted." else "interrupted"
+        occurrence.failure_reason = failure_reason if occurrence.status == "failed" else ""
+        occurrence.save(update_fields=("status", "failure_reason"))
         advance_schedule(occurrence)

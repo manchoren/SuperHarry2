@@ -13,7 +13,7 @@
     <h2>Your CSV files</h2>
     <ul>
       {% for record in files %}
-        <li><a href="{% url 'csv-detail' record.pk %}">{{ record.name }}</a></li>
+        <li>File #{{ record.pk }}: <a href="{% url 'csv-detail' record.pk %}">{{ record.name }}</a></li>
       {% endfor %}
     </ul>
   {% endif %}

@@ -55,6 +55,7 @@
           {% for occurrence in message.scheduleoccurrence_set.all %}
             <small>Scheduled task #{{ occurrence.schedule_id }}</small>
             {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
+            {% if occurrence.failure_reason %}<p>Scheduled task failed: {{ occurrence.failure_reason }}</p>{% endif %}
             {% if occurrence.approval_file_id and occurrence.approval_file.owner_id == conversation.owner_id %}
               <a href="{% url 'csv-detail' occurrence.approval_file_id %}">Review and approve CSV</a>
             {% endif %}

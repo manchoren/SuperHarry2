@@ -153,6 +153,7 @@ class ScheduleOccurrence(models.Model):
     reply = models.ForeignKey(Message, null=True, on_delete=models.SET_NULL)
     approval_file = models.ForeignKey(CsvFile, null=True, blank=True, on_delete=models.SET_NULL)
     user_request = models.TextField(blank=True)
+    failure_reason = models.TextField(blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("schedule", "due_at"), name="unique_schedule_occurrence")]

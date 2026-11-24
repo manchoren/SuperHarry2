@@ -18,6 +18,41 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_scheduled_gateway_quota_failure_is_visible_in_the_conversation(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        self.gateway_responses.append((429, b'{}'))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "The free route has exhausted its quota or rate limit.")
+        self.assertEqual(schedule.occurrences.get().status, "failed")
+
+    def test_initial_recurring_time_in_dst_gap_uses_first_valid_instant(self):
+        arguments = json.dumps({"prompt": "Review", "due_at": "2026-03-08T02:30:00-05:00", "timezone": "America/New_York", "repetition": "daily"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.chat.timezone.now", return_value=datetime(2026, 3, 1, tzinfo=timezone.utc)):
+            response = self.client.post("/chat/send/", {"message": "Review every day at 2:30"})
+            notice = b"".join(response.streaming_content).decode()
+        self.assertIn("2026-03-08T07:00:00+00:00", notice)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 3, 8, 7, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "2026-03-09 02:30")
+
+    def test_scheduling_tool_provides_the_current_time_and_deployment_zone(self):
+        with patch("superharry.chat.timezone.now", return_value=datetime(2026, 1, 15, 15, tzinfo=timezone.utc)):
+            response = self.client.post("/chat/send/", {"message": "Choose a time for a follow-up"})
+            list(response.streaming_content)
+        tools = self.requests[-1][2]["tools"]
+        description = next(tool["function"]["description"] for tool in tools if tool["function"]["name"] == "create_schedule")
+        self.assertIn("2026-01-15T10:00:00-05:00", description)
+        self.assertIn("America/Guayaquil", description)
+
     def test_required_decision_is_visible_even_when_response_cap_is_small(self):
         from superharry.models import Conversation, Schedule, UserChatLimits
 
@@ -711,7 +746,11 @@ class ChatTests(TestCase):
         retry = self.client.post(retry_url)
         self.assertEqual(retry.status_code, 200)
         self.assertEqual([json.loads(chunk) for chunk in retry.streaming_content][-1], {"done": True})
-        self.assertEqual(self.requests[0], self.requests[1])
+        first_request = json.loads(json.dumps(self.requests[0]))
+        retried_request = json.loads(json.dumps(self.requests[1]))
+        for request in (first_request, retried_request):
+            request[2]["tools"][0]["function"].pop("description")
+        self.assertEqual(first_request, retried_request)
         page = self.client.get(history)
         self.assertContains(page, "<p>Original question</p>", count=1, html=True)
         self.assertContains(page, "Partial reply")

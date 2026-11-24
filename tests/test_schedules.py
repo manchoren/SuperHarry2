@@ -12,6 +12,51 @@ from superharry.models import Conversation
 
 @override_settings(OMNIROUTE_URL="http://gateway", OMNIROUTE_API_KEY="key", CHAT_MODEL="test/model")
 class SchedulerTests(TestCase):
+    def test_grace_window_is_rechecked_after_model_catalog_lookup(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Work")
+        Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+        clock = [datetime(2026, 1, 1, 12, 59, tzinfo=timezone.utc)]
+
+        def catalog():
+            clock[0] = datetime(2026, 1, 1, 13, 1, tzinfo=timezone.utc)
+            return ["test/model"]
+
+        with patch("superharry.scheduler.available_routes", side_effect=catalog):
+            with patch("superharry.chat.stream_reply") as gateway:
+                with patch("superharry.scheduler.timezone.now", side_effect=lambda: clock[0]):
+                    call_command("run_schedules", stdout=StringIO())
+        gateway.assert_not_called()
+        self.client.force_login(owner)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Scheduled task missed")
+
+    def test_grace_window_is_rechecked_after_an_earlier_run_finishes(self):
+        from superharry.models import Schedule
+
+        first_owner = get_user_model().objects.create_user(username="first")
+        second_owner = get_user_model().objects.create_user(username="second")
+        for owner in (first_owner, second_owner):
+            conversation = Conversation.objects.create(owner=owner, title="Work")
+            Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+                next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+        clock = [datetime(2026, 1, 1, 12, 59, tzinfo=timezone.utc)]
+
+        def response(messages, *, route_id, on_submit, tools=None):
+            on_submit()
+            clock[0] = datetime(2026, 1, 1, 13, 1, tzinfo=timezone.utc)
+            yield "Completed."
+
+        with patch("superharry.chat.stream_reply", side_effect=response) as gateway:
+            with patch("superharry.scheduler.timezone.now", side_effect=lambda: clock[0]):
+                call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(gateway.call_count, 1)
+        self.client.force_login(second_owner)
+        second = Schedule.objects.get(owner=second_owner)
+        self.assertContains(self.client.get(f"/chat/{second.conversation_id}/"), "Scheduled task missed")
+
     def setUp(self):
         self.enterContext(patch("superharry.scheduler.available_routes", return_value=["test/model"]))
 
@@ -90,7 +135,7 @@ class SchedulerTests(TestCase):
                 call_command("run_schedules", stdout=StringIO())
         schedule.refresh_from_db()
         self.assertEqual(schedule.next_run, datetime(2026, 3, 9, 6, 30, tzinfo=timezone.utc))
-        self.assertEqual(list(schedule.occurrences.order_by("due_at").values_list("status", flat=True)), ["interrupted", "interrupted"])
+        self.assertEqual(list(schedule.occurrences.order_by("due_at").values_list("status", flat=True)), ["failed", "failed"])
 
     def test_weekly_schedule_uses_first_fold_then_keeps_local_time(self):
         from superharry.models import Schedule

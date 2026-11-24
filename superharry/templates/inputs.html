@@ -2,6 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><title>Chat inputs</title></head>
 <body><h1>Chat inputs</h1>
 <p><a href="{% url 'chat' %}">Back to chat</a></p>
+<p>The model receives your input names and IDs in chat. Input contents are sent only when selected for scheduled work.</p>
 {% if error %}<p role="alert">{{ error }}</p>{% endif %}
 <form method="post" enctype="multipart/form-data">{% csrf_token %}
   <label>Text, CSV, PNG or JPEG file <input type="file" name="file" required></label>
