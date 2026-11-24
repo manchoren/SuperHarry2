@@ -7,6 +7,21 @@ class Conversation(models.Model):
     title = models.CharField(max_length=100)
 
 
+class ChatRoute(models.Model):
+    route_id = models.CharField(max_length=255)
+
+    @classmethod
+    def active_id(cls):
+        return (
+            cls.objects.filter(pk=1).values_list("route_id", flat=True).first()
+            or settings.CHAT_MODEL
+        )
+
+    @classmethod
+    def select(cls, route_id):
+        cls.objects.update_or_create(pk=1, defaults={"route_id": route_id})
+
+
 class SavedMemory(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     content = models.TextField()

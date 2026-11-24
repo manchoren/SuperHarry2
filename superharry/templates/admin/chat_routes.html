@@ -1,0 +1,42 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <p>Default route: <strong>{{ active_route|default:"Not configured" }}</strong></p>
+  <h2>Available routes</h2>
+  <ul>
+    {% for route in routes %}
+      <li>
+        {{ route }}
+        {% if can_change %}
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="route_id" value="{{ route }}">
+            <button type="submit" name="action" value="test">Test route</button>
+            {% if route != active_route %}
+              <button type="submit" name="action" value="select">Set as default</button>
+            {% endif %}
+          </form>
+        {% endif %}
+      </li>
+    {% empty %}
+      <li>No routes available.</li>
+    {% endfor %}
+  </ul>
+  <h2>Existing provider connections</h2>
+  <ul>
+    {% for connection in connections %}
+      <li>{{ connection.name }} ({{ connection.provider }})</li>
+    {% empty %}
+      <li>No provider connections available.</li>
+    {% endfor %}
+  </ul>
+  {% if can_change and connections %}
+    <h2>Maintain a model entry</h2>
+    <form method="post">
+      {% csrf_token %}
+      {{ model_form.as_p }}
+      <button type="submit" name="action" value="add-model">Add model</button>
+      <button type="submit" name="action" value="update-model">Update model</button>
+    </form>
+  {% endif %}
+{% endblock %}

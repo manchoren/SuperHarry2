@@ -13,7 +13,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from .gateway import GatewayFailure, stream_reply
-from .models import Conversation, Message
+from .models import ChatRoute, Conversation, Message
 
 
 @never_cache
@@ -37,15 +37,15 @@ def page(request, conversation_id=None):
         "conversations": conversations,
         "conversation": conversation,
         "history": history,
-        "active_model": settings.CHAT_MODEL,
+        "active_model": ChatRoute.active_id(),
     })
 
 
-def stream_message(reply, context):
+def stream_message(reply, context, route_id):
     complete = False
     error = "The model reply was interrupted."
     try:
-        for text in stream_reply(context):
+        for text in stream_reply(context, route_id=route_id):
             reply.content += text
             reply.save(update_fields=("content",))
             yield json.dumps({"text": text}) + "\n"
@@ -63,7 +63,7 @@ def stream_message(reply, context):
     yield json.dumps(result) + "\n"
 
 
-def reply_response(reply):
+def reply_response(reply, route_id):
     context = list(
         reply.conversation.messages.filter(complete=True)
         .annotate(turn_order=Coalesce("prompt_id", "pk"))
@@ -72,15 +72,15 @@ def reply_response(reply):
         .values("role", "content")
     )
     response = StreamingHttpResponse(
-        stream_message(reply, context), content_type="application/x-ndjson"
+        stream_message(reply, context, route_id), content_type="application/x-ndjson"
     )
     response["X-Conversation-Id"] = str(reply.conversation_id)
     response["Location"] = reverse("chat-history", args=(reply.conversation_id,))
     return response
 
 
-def gateway_configured():
-    return all((settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, settings.CHAT_MODEL))
+def gateway_configured(route_id):
+    return all((settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, route_id))
 
 
 @never_cache
@@ -96,7 +96,8 @@ def send(request, conversation_id=None):
     text = request.POST.get("message", "").strip()
     if not text:
         return JsonResponse({"error": "Enter a message."}, status=400)
-    if not gateway_configured():
+    route_id = ChatRoute.active_id()
+    if not gateway_configured(route_id):
         return JsonResponse({"error": "The model gateway is not configured."}, status=503)
 
     with transaction.atomic():
@@ -107,7 +108,7 @@ def send(request, conversation_id=None):
             prompt=prompt, role=Message.Role.ASSISTANT, complete=False, in_progress=True
         )
 
-    return reply_response(reply)
+    return reply_response(reply, route_id)
 
 
 @never_cache
@@ -124,7 +125,8 @@ def retry(request, conversation_id, reply_id):
     )
     if attempt.complete or attempt.in_progress or attempt.prompt.replies.filter(pk__gt=attempt.pk).exists():
         return JsonResponse({"error": "Reload the conversation for the latest reply."}, status=409)
-    if not gateway_configured():
+    route_id = ChatRoute.active_id()
+    if not gateway_configured(route_id):
         return JsonResponse({"error": "The model gateway is not configured."}, status=503)
     try:
         with transaction.atomic():
@@ -136,4 +138,4 @@ def retry(request, conversation_id, reply_id):
             )
     except IntegrityError:
         return JsonResponse({"error": "A reply already exists for this message."}, status=409)
-    return reply_response(reply)
+    return reply_response(reply, route_id)

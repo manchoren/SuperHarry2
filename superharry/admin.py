@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin, UserAdmin
 from django.contrib.auth.models import Group, User
 
+from . import route_admin  # Registers the chat route admin view.
+
 
 admin.site.unregister(User)
 admin.site.unregister(Group)

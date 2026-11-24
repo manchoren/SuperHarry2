@@ -16,6 +16,10 @@ Set `OMNIROUTE_URL` to the gateway base URL reachable from Django's container an
 
 Run `docker compose -f compose.yaml -f compose.omniroute.yaml up --build -d` and visit `http://127.0.0.1:8000/`. Sign in with an account created in Django admin. Run the commands from the same Compose project directory so both startup modes use the same SQLite volume.
 
+To enable model-entry administration, create a separate OmniRoute Access Token with `write` scope and save it in `.secrets/omniroute_management_token`. Set `OMNIROUTE_MANAGEMENT_TOKEN_PATH` if the file is elsewhere. Keep the inference key free of management permissions. Add `-f compose.omniroute-management.yaml` after the other Compose files when starting Django.
+
+Open **Chat routes** in Django admin to list routes visible to the inference key, test a route with a short inference request, and set the saved default used by chat. The saved selection overrides `CHAT_MODEL`. Add or update model entries by selecting an existing provider connection. OmniRoute stores these entries at provider level. Keep provider-account management, upstream credentials, OAuth, and fallback configuration in OmniRoute. Keep paid fallback disabled there.
+
 The following sections specify the full deployment workflow, including the OmniRoute installer and later milestone checks.
 
 ## Provision

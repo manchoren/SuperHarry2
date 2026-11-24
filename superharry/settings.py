@@ -67,3 +67,9 @@ OMNIROUTE_API_KEY = (
     if inference_key_file
     else ""
 )
+management_token_file = os.environ.get("OMNIROUTE_MANAGEMENT_TOKEN_FILE")
+OMNIROUTE_MANAGEMENT_TOKEN = (
+    Path(management_token_file).read_text(encoding="utf-8").strip()
+    if management_token_file
+    else ""
+)

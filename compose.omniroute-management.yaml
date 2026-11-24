@@ -1,0 +1,10 @@
+services:
+  django:
+    environment:
+      OMNIROUTE_MANAGEMENT_TOKEN_FILE: /run/secrets/omniroute_management_token
+    secrets:
+      - omniroute_management_token
+
+secrets:
+  omniroute_management_token:
+    file: ${OMNIROUTE_MANAGEMENT_TOKEN_PATH:-.secrets/omniroute_management_token}
