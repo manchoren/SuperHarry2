@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .chat import stream_message
+from .gateway import GatewayFailure, available_routes
 from .models import ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
 from .schedule_time import next_occurrence
@@ -136,6 +137,19 @@ def _run_due():
             continue
 
         try:
+            route = schedule.preferred_model or ChatRoute.active_id()
+            if not route or route not in available_routes():
+                raise ValueError("The preferred model is unavailable.")
+        except (GatewayFailure, ValueError) as failure:
+            occurrence.reply = schedule.conversation.messages.create(
+                role=Message.Role.ASSISTANT, content=f"Scheduled task failed: {failure}",
+            )
+            occurrence.status = "failed"
+            occurrence.save(update_fields=("reply", "status"))
+            advance_schedule(occurrence)
+            continue
+
+        try:
             skill = text_skill(schedule.prompt)
         except ValueError as failure:
             occurrence.reply = schedule.conversation.messages.create(
@@ -174,7 +188,7 @@ def _run_due():
         occurrence.reply = submission.reply
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
-        for _ in stream_message(submission, schedule.preferred_model or ChatRoute.active_id(), limit, skill, scheduled=True):
+        for _ in stream_message(submission, route, limit, skill, scheduled=True):
             pass
         submission.reply.refresh_from_db()
         occurrence.status = "complete" if submission.reply.complete else "interrupted"

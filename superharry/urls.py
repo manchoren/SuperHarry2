@@ -22,5 +22,7 @@ urlpatterns = [
     path("chat/<int:conversation_id>/send/", chat.send, name="chat-continue"),
     path("chat/<int:conversation_id>/memory/", chat.memory_setting, name="chat-memory"),
     path("chat/<int:conversation_id>/retry/<int:reply_id>/", chat.retry, name="chat-retry"),
+    path("schedules/", chat.schedule_menu, name="schedules"),
+    path("schedules/<int:schedule_id>/model/", chat.schedule_model, name="schedule-model"),
     path("schedules/<int:schedule_id>/cancel/", chat.cancel_schedule, name="schedule-cancel"),
 ]

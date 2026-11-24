@@ -12,7 +12,7 @@ admin.site.unregister(Group)
 
 @admin.register(ChatLimits)
 class ChatLimitsAdmin(admin.ModelAdmin):
-    list_display = ("daily_messages", "max_response_characters")
+    list_display = ("daily_messages", "max_response_characters", "max_active_schedules")
 
     def has_add_permission(self, request):
         return False

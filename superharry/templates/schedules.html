@@ -1,0 +1,34 @@
+{% load tz %}
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Schedules</title></head>
+<body>
+  <h1>Schedules</h1>
+  <p><a href="{% url 'chat' %}">Back to chat</a></p>
+  {% for schedule in schedules %}
+    <article>
+      <h2>Scheduled task #{{ schedule.pk }}</h2>
+      <p>{{ schedule.prompt }}</p>
+      <p><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></p>
+      {% if schedule.canceled %}<p>Canceled</p>
+      {% elif schedule.next_run %}<p>Next: {% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
+      {% else %}<p>Submitted or finished</p>{% endif %}
+      <p>Latest outcome: {{ schedule.latest_outcome|default:"None yet" }}</p>
+      <p>Preferred model: {{ schedule.preferred_model|default:"Use active model" }}</p>
+      {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
+        <form method="post" action="{% url 'schedule-model' schedule.pk %}">
+          {% csrf_token %}<label>Model <select name="model"><option value="">Use active model</option>
+          {% if schedule.preferred_model and schedule.preferred_model not in routes %}<option value="{{ schedule.preferred_model }}" selected disabled>{{ schedule.preferred_model }} (unavailable)</option>{% endif %}
+          {% for route in routes %}<option value="{{ route }}"{% if route == schedule.preferred_model %} selected{% endif %}>{{ route }}</option>{% endfor %}</select></label>
+          <button type="submit">Save model</button>
+        </form>
+      {% endif %}
+      {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
+        <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
+          {% csrf_token %}<input type="hidden" name="return_to" value="menu"><button type="submit">Cancel schedule</button>
+        </form>
+      {% endif %}
+    </article>
+  {% empty %}<p>No schedules yet.</p>{% endfor %}
+</body>
+</html>

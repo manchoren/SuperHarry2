@@ -12,6 +12,24 @@ from superharry.models import Conversation
 
 @override_settings(OMNIROUTE_URL="http://gateway", OMNIROUTE_API_KEY="key", CHAT_MODEL="test/model")
 class SchedulerTests(TestCase):
+    def setUp(self):
+        self.enterContext(patch("superharry.scheduler.available_routes", return_value=["test/model"]))
+
+    def test_schedule_menu_only_shows_the_signed_in_owners_schedules(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        other = get_user_model().objects.create_user(username="other")
+        for user, prompt in ((owner, "Private owner task"), (other, "Private other task")):
+            conversation = Conversation.objects.create(owner=user, title="Work")
+            Schedule.objects.create(owner=user, conversation=conversation, prompt=prompt,
+                next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+        self.client.force_login(owner)
+        page = self.client.get("/schedules/")
+        self.assertContains(page, "Private owner task")
+        self.assertNotContains(page, "Private other task")
+        self.assertContains(page, "Cancel schedule")
+
     def test_restart_advances_recurring_schedule_after_a_completed_occurrence(self):
         from superharry.models import Schedule, ScheduleOccurrence
 

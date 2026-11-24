@@ -14,6 +14,72 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_completed_one_time_schedule_releases_its_limit_slot(self):
+        from superharry.models import ChatLimits, Conversation, Schedule
+
+        ChatLimits.objects.filter(pk=1).update(max_active_schedules=1)
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="First",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        arguments = json.dumps({"prompt": "Second", "due_at": "2099-01-02T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Schedule second"})
+        self.assertIn("Scheduled task #", b"".join(response.streaming_content).decode())
+
+    def test_schedule_cap_can_be_configured_and_canceling_releases_a_slot(self):
+        from superharry.models import ChatLimits, Conversation, Schedule
+
+        admin = Client()
+        admin.force_login(get_user_model().objects.create_superuser(username="limit-admin"))
+        result = admin.post("/admin/superharry/chatlimits/1/change/", {
+            "daily_messages": 50, "max_response_characters": 12000, "max_active_schedules": 1,
+        })
+        self.assertEqual(result.status_code, 302)
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        existing = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="First",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        arguments = json.dumps({"prompt": "Second", "due_at": "2099-01-02T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
+        self.gateway_responses.append((200, payload))
+        first = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Schedule second"})
+        self.assertIn("schedule limit", b"".join(first.streaming_content).decode().lower())
+        self.assertEqual(self.client.post(f"/schedules/{existing.pk}/cancel/").status_code, 302)
+        self.gateway_responses.append((200, payload))
+        second = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Schedule second again"})
+        self.assertIn("Scheduled task #", b"".join(second.streaming_content).decode())
+
+    def test_scheduled_run_reports_a_model_that_is_no_longer_available(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/removed")
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(self.requests, [])
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Scheduled task failed: The preferred model is unavailable.")
+
+    def test_owner_can_change_schedule_model_or_use_active_model(self):
+        from superharry.models import ChatRoute, Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        stranger = Client()
+        stranger.force_login(get_user_model().objects.create_user(username="other"))
+        self.assertEqual(stranger.post(f"/schedules/{schedule.pk}/model/", {"model": "test/alternate"}).status_code, 404)
+        self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/model/", {"model": "test/alternate"}).status_code, 302)
+        self.assertContains(self.client.get("/schedules/"), "test/alternate")
+        self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/model/", {"model": ""}).status_code, 302)
+        ChatRoute.select("test/alternate")
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(self.requests[-1][2]["model"], "test/alternate")
+
     def test_weekly_schedule_uses_first_occurrence_of_ambiguous_local_time(self):
         arguments = json.dumps({"prompt": "Review", "due_at": "2026-11-01T06:30:00Z", "timezone": "America/New_York", "repetition": "weekly"})
         event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
@@ -110,7 +176,7 @@ class ChatTests(TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"data":[{"id":"test/alternate"}]}')
+                self.wfile.write(b'{"data":[{"id":"test/alternate"},{"id":"test/free-model"}]}')
 
             def do_POST(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -149,6 +215,7 @@ class ChatTests(TestCase):
         result = admin.post("/admin/superharry/chatlimits/1/change/", {
             "daily_messages": daily_messages,
             "max_response_characters": max_response_characters,
+            "max_active_schedules": 10,
         })
         self.assertRedirects(result, "/admin/superharry/chatlimits/")
 

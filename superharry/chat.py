@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -20,7 +20,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .gateway import GatewayFailure, available_routes, stream_reply
 from .memories import relevant_memory_excerpts
-from .models import ChatRoute, Conversation, Message, Schedule, ScheduleOccurrence
+from .models import ChatLimits, ChatRoute, Conversation, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
 from .schedule_time import resolve_wall_time
 from .text_skills import text_skill
@@ -36,6 +36,10 @@ SCHEDULE_TOOL = {"type": "function", "function": {
         "preferred_model": {"type": "string", "description": "Optional configured model"},
     }, "required": ["prompt", "due_at"], "additionalProperties": False},
 }}
+
+
+class ScheduleLimitReached(ValueError):
+    pass
 
 
 def create_schedule(call, submission, route_id):
@@ -70,10 +74,19 @@ def create_schedule(call, submission, route_id):
         due_at = resolve_wall_time(local.date(), local.time(), zone)
         if due_at <= timezone.now():
             raise ValueError("The first occurrence must be in the future.")
-    return Schedule.objects.create(owner=submission.owner, conversation=submission.reply.conversation,
-        prompt=prompt, next_run=due_at, timezone=zone, repetition=repetition, preferred_model=model,
-        wall_time=local.time() if repetition != "once" else None,
-        weekday=local.weekday() if repetition == "weekly" else None)
+    with transaction.atomic():
+        # Serialize concurrent creations before checking the owner's cap on SQLite.
+        ChatLimits.objects.filter(pk=1).update(max_active_schedules=F("max_active_schedules"))
+        maximum = ChatLimits.objects.get(pk=1).max_active_schedules
+        active = Schedule.objects.filter(owner=submission.owner, canceled=False).filter(
+            Q(next_run__isnull=False) | Q(occurrences__status__in=("claimed", "running"))
+        ).distinct().count()
+        if active >= maximum:
+            raise ScheduleLimitReached("The active schedule limit has been reached.")
+        return Schedule.objects.create(owner=submission.owner, conversation=submission.reply.conversation,
+            prompt=prompt, next_run=due_at, timezone=zone, repetition=repetition, preferred_model=model,
+            wall_time=local.time() if repetition != "once" else None,
+            weekday=local.weekday() if repetition == "weekly" else None)
 
 
 @never_cache
@@ -107,10 +120,44 @@ def page(request, conversation_id=None):
 
 @never_cache
 @login_required
+@require_GET
+def schedule_menu(request):
+    latest = ScheduleOccurrence.objects.filter(schedule_id=OuterRef("pk")).order_by("-due_at", "-pk")
+    schedules = Schedule.objects.filter(owner=request.user, conversation__owner=request.user).annotate(
+        latest_outcome=Subquery(latest.values("status")[:1]),
+        running=Exists(latest.filter(status__in=("claimed", "running"))),
+    ).select_related("conversation").order_by("-pk")
+    try:
+        routes = available_routes()
+    except GatewayFailure:
+        routes = []
+    return render(request, "schedules.html", {"schedules": schedules, "routes": routes})
+
+
+@never_cache
+@login_required
+@require_POST
+def schedule_model(request, schedule_id):
+    schedule = get_object_or_404(Schedule, pk=schedule_id, owner=request.user, conversation__owner=request.user)
+    model = request.POST.get("model", "")
+    try:
+        if model and (len(model) > 255 or model not in available_routes()):
+            return HttpResponse("Select a configured model.", status=400)
+    except GatewayFailure:
+        return HttpResponse("The model catalog is unavailable.", status=503)
+    schedule.preferred_model = model
+    schedule.save(update_fields=("preferred_model",))
+    return redirect("schedules")
+
+
+@never_cache
+@login_required
 @require_POST
 def cancel_schedule(request, schedule_id):
     schedule = get_object_or_404(Schedule, pk=schedule_id, owner=request.user, conversation__owner=request.user)
     Schedule.objects.filter(pk=schedule.pk, owner=request.user).update(canceled=True, next_run=None)
+    if request.POST.get("return_to") == "menu":
+        return redirect("schedules")
     return redirect("chat-history", conversation_id=schedule.conversation_id)
 
 
@@ -165,6 +212,8 @@ def stream_message(submission, route_id, max_response_characters, skill, *, sche
                     try:
                         schedule = create_schedule(text["tool_call"], submission, route_id)
                         text = f"Scheduled task #{schedule.pk}: {schedule.prompt} at {schedule.next_run.isoformat()} ({schedule.timezone}), {schedule.repetition}. Open this conversation to cancel it."
+                    except ScheduleLimitReached as failure:
+                        text = str(failure)
                     except (ValueError, GatewayFailure, KeyError, TypeError):
                         text = "The schedule could not be created. Check the requested time, time zone and model."
                 remaining = max_response_characters - len(reply.content)

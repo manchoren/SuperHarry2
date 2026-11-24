@@ -19,6 +19,11 @@ class SchedulerProcessTests(SimpleTestCase):
         calls = []
 
         class Gateway(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"test/model"}]}')
+
             def do_POST(self):
                 calls.append(self.rfile.read(int(self.headers["Content-Length"])))
                 started.set()
@@ -73,6 +78,11 @@ Schedule.objects.create(owner=u, conversation=c, prompt='Check', next_run=timezo
         calls = []
 
         class Gateway(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"test/model"}]}')
+
             def do_POST(self):
                 calls.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
                 started.set()

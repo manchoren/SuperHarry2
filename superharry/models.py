@@ -29,6 +29,7 @@ class ChatRoute(models.Model):
 
 class ChatLimits(models.Model):
     daily_messages = models.PositiveIntegerField(default=50)
+    max_active_schedules = models.PositiveIntegerField(default=10)
     max_response_characters = models.PositiveIntegerField(
         default=12000, validators=[MinValueValidator(1)]
     )
