@@ -124,6 +124,8 @@ class Schedule(models.Model):
     next_run = models.DateTimeField(null=True)
     timezone = models.CharField(max_length=64)
     repetition = models.CharField(max_length=8)
+    wall_time = models.TimeField(null=True, blank=True)
+    weekday = models.PositiveSmallIntegerField(null=True, blank=True)
     preferred_model = models.CharField(max_length=255, blank=True)
     canceled = models.BooleanField(default=False)
 

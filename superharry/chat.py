@@ -22,15 +22,17 @@ from .gateway import GatewayFailure, available_routes, stream_reply
 from .memories import relevant_memory_excerpts
 from .models import ChatRoute, Conversation, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
+from .schedule_time import resolve_wall_time
 from .text_skills import text_skill
 
 
 SCHEDULE_TOOL = {"type": "function", "function": {
-    "name": "create_schedule", "description": "Schedule a one-time follow-up in this conversation.",
+    "name": "create_schedule", "description": "Schedule a follow-up in this conversation.",
     "parameters": {"type": "object", "properties": {
         "prompt": {"type": "string", "description": "Task and context for the future run"},
         "due_at": {"type": "string", "description": "Future ISO 8601 timestamp with offset"},
         "timezone": {"type": "string", "description": "IANA time zone"},
+        "repetition": {"type": "string", "enum": ["once", "daily", "weekly"]},
         "preferred_model": {"type": "string", "description": "Optional configured model"},
     }, "required": ["prompt", "due_at"], "additionalProperties": False},
 }}
@@ -40,7 +42,7 @@ def create_schedule(call, submission, route_id):
     if call.get("name") != "create_schedule":
         raise ValueError("Unknown tool call.")
     args = json.loads(call["arguments"])
-    if not isinstance(args, dict) or set(args) - {"prompt", "due_at", "timezone", "preferred_model"}:
+    if not isinstance(args, dict) or set(args) - {"prompt", "due_at", "timezone", "preferred_model", "repetition"}:
         raise ValueError("Invalid schedule arguments.")
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 65536:
@@ -56,12 +58,22 @@ def create_schedule(call, submission, route_id):
     except (KeyError, AttributeError, TypeError, ZoneInfoNotFoundError):
         raise ValueError("Invalid schedule time or time zone.") from None
     model = args.get("preferred_model", route_id)
+    repetition = args.get("repetition", "once")
+    if repetition not in ("once", "daily", "weekly"):
+        raise ValueError("Invalid repetition.")
     if not isinstance(model, str) or not model or len(model) > 255:
         raise ValueError("Invalid model.")
     if model != route_id and model not in available_routes():
         raise ValueError("The requested model is unavailable.")
+    local = due_at.astimezone(ZoneInfo(zone))
+    if repetition != "once":
+        due_at = resolve_wall_time(local.date(), local.time(), zone)
+        if due_at <= timezone.now():
+            raise ValueError("The first occurrence must be in the future.")
     return Schedule.objects.create(owner=submission.owner, conversation=submission.reply.conversation,
-        prompt=prompt, next_run=due_at, timezone=zone, repetition="once", preferred_model=model)
+        prompt=prompt, next_run=due_at, timezone=zone, repetition=repetition, preferred_model=model,
+        wall_time=local.time() if repetition != "once" else None,
+        weekday=local.weekday() if repetition == "weekly" else None)
 
 
 @never_cache
@@ -152,7 +164,7 @@ def stream_message(submission, route_id, max_response_characters, skill, *, sche
                 if isinstance(text, dict) and "tool_call" in text:
                     try:
                         schedule = create_schedule(text["tool_call"], submission, route_id)
-                        text = f"Scheduled task #{schedule.pk}: {schedule.prompt} at {schedule.next_run.isoformat()} ({schedule.timezone}). Open this conversation to cancel it."
+                        text = f"Scheduled task #{schedule.pk}: {schedule.prompt} at {schedule.next_run.isoformat()} ({schedule.timezone}), {schedule.repetition}. Open this conversation to cancel it."
                     except (ValueError, GatewayFailure, KeyError, TypeError):
                         text = "The schedule could not be created. Check the requested time, time zone and model."
                 remaining = max_response_characters - len(reply.content)

@@ -14,6 +14,30 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_weekly_schedule_uses_first_occurrence_of_ambiguous_local_time(self):
+        arguments = json.dumps({"prompt": "Review", "due_at": "2026-11-01T06:30:00Z", "timezone": "America/New_York", "repetition": "weekly"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.chat.timezone.now", return_value=datetime(2026, 10, 1, tzinfo=timezone.utc)):
+            response = self.client.post("/chat/send/", {"message": "Review weekly"})
+            notice = b"".join(response.streaming_content).decode()
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "Weekly")
+        self.assertIn("2026-11-01T05:30:00+00:00", notice)
+
+    def test_model_creates_a_daily_schedule_in_the_requested_time_zone(self):
+        arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T14:00:00Z", "timezone": "America/New_York", "repetition": "daily"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Review it daily"})
+        notice = b"".join(response.streaming_content).decode()
+        self.assertIn("daily", notice)
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "Review the report")
+        self.assertContains(page, "America/New_York")
+        self.assertContains(page, "Daily")
+        self.assertContains(page, "Cancel schedule")
+
     def test_schedule_uses_the_explicit_configured_model(self):
         arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T12:00:00Z", "preferred_model": "test/alternate"})
         event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}

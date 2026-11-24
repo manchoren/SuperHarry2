@@ -16,11 +16,21 @@ from django.utils import timezone
 from .chat import stream_message
 from .models import ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
+from .schedule_time import next_occurrence
 from .text_skills import text_skill
 
 
 def occurrence_key(occurrence):
     return uuid5(NAMESPACE_URL, f"superharry:schedule-occurrence:{occurrence.pk}")
+
+
+def advance_schedule(occurrence):
+    schedule = occurrence.schedule
+    if schedule.repetition not in ("daily", "weekly") or schedule.wall_time is None:
+        return
+    following = next_occurrence(occurrence.due_at, schedule.wall_time, schedule.timezone,
+                                schedule.repetition, schedule.weekday)
+    Schedule.objects.filter(pk=schedule.pk, canceled=False, next_run__isnull=True).update(next_run=following)
 
 
 @contextmanager
@@ -74,6 +84,7 @@ def recover_occurrences():
                 if submission:
                     submission.active = False
                     submission.save(update_fields=("active",))
+                advance_schedule(occurrence)
                 continue
             if submission:
                 submission.delete()
@@ -85,6 +96,10 @@ def recover_occurrences():
             if not occurrence.schedule.canceled:
                 Schedule.objects.filter(pk=occurrence.schedule_id, next_run__isnull=True).update(next_run=occurrence.due_at)
             occurrence.delete()
+    for schedule in Schedule.objects.filter(canceled=False, next_run__isnull=True, repetition__in=("daily", "weekly")):
+        occurrence = schedule.occurrences.order_by("-due_at").first()
+        if occurrence and occurrence.status not in ("claimed", "running"):
+            advance_schedule(occurrence)
 
 
 def run_due():
@@ -117,6 +132,7 @@ def _run_due():
                 role=Message.Role.ASSISTANT, content="Scheduled task missed: it could not start within one hour."
             )
             occurrence.save(update_fields=("reply", "status"))
+            advance_schedule(occurrence)
             continue
 
         try:
@@ -127,6 +143,7 @@ def _run_due():
             )
             occurrence.status = "failed"
             occurrence.save(update_fields=("reply", "status"))
+            advance_schedule(occurrence)
             continue
 
         def create_reply():
@@ -152,6 +169,7 @@ def _run_due():
                     content=f"Scheduled task {occurrence.status}: {failure}",
                 )
                 occurrence.save(update_fields=("reply", "status"))
+                advance_schedule(occurrence)
             continue
         occurrence.reply = submission.reply
         occurrence.status = "running"
@@ -161,3 +179,4 @@ def _run_due():
         submission.reply.refresh_from_db()
         occurrence.status = "complete" if submission.reply.complete else "interrupted"
         occurrence.save(update_fields=("status",))
+        advance_schedule(occurrence)

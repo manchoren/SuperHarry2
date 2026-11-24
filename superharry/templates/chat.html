@@ -32,6 +32,7 @@
       <article>
         <strong>Scheduled task #{{ schedule.pk }}</strong>
         <p>{{ schedule.prompt }}</p>
+        {% if schedule.repetition == "daily" %}<p>Daily</p>{% elif schedule.repetition == "weekly" %}<p>Weekly</p>{% endif %}
         {% if schedule.canceled %}<p>Canceled</p>
         {% elif schedule.next_run %}
           <p>{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>

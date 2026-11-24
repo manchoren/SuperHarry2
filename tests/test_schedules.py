@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from io import StringIO
 from unittest.mock import patch
 from uuid import NAMESPACE_URL, uuid5
@@ -12,6 +12,114 @@ from superharry.models import Conversation
 
 @override_settings(OMNIROUTE_URL="http://gateway", OMNIROUTE_API_KEY="key", CHAT_MODEL="test/model")
 class SchedulerTests(TestCase):
+    def test_restart_advances_recurring_schedule_after_a_completed_occurrence(self):
+        from superharry.models import Schedule, ScheduleOccurrence
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Daily work")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check", next_run=None,
+            timezone="UTC", repetition="daily", wall_time=time(12), preferred_model="test/model")
+        ScheduleOccurrence.objects.create(schedule=schedule, due_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), status="complete")
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run, datetime(2026, 1, 2, 12, tzinfo=timezone.utc))
+
+    def test_canceling_a_recurring_schedule_during_its_run_prevents_next_run(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Daily work")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC",
+            repetition="daily", wall_time=time(12), preferred_model="test/model")
+        self.client.force_login(owner)
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            self.client.post(f"/schedules/{schedule.pk}/cancel/")
+            yield "Finished."
+
+        with patch("superharry.chat.stream_reply", side_effect=response):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        schedule.refresh_from_db()
+        self.assertTrue(schedule.canceled)
+        self.assertIsNone(schedule.next_run)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Finished.")
+
+    def test_daily_gap_preserves_original_wall_time_after_failed_run(self):
+        from superharry.gateway import GatewayFailure
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Daily work")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+            next_run=datetime(2026, 3, 7, 7, 30, tzinfo=timezone.utc), timezone="America/New_York",
+            repetition="daily", wall_time=time(2, 30), preferred_model="test/model")
+
+        def failure(messages, *, route_id, on_submit):
+            on_submit()
+            raise GatewayFailure("Unavailable")
+            yield
+
+        with patch("superharry.chat.stream_reply", side_effect=failure):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 3, 7, 7, 31, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            schedule.refresh_from_db()
+            self.assertEqual(schedule.next_run, datetime(2026, 3, 8, 7, tzinfo=timezone.utc))
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 3, 8, 7, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run, datetime(2026, 3, 9, 6, 30, tzinfo=timezone.utc))
+        self.assertEqual(list(schedule.occurrences.order_by("due_at").values_list("status", flat=True)), ["interrupted", "interrupted"])
+
+    def test_weekly_schedule_uses_first_fold_then_keeps_local_time(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Weekly work")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+            next_run=datetime(2026, 10, 25, 5, 30, tzinfo=timezone.utc), timezone="America/New_York",
+            repetition="weekly", wall_time=time(1, 30), weekday=6, preferred_model="test/model")
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            yield "Checked."
+
+        with patch("superharry.chat.stream_reply", side_effect=response):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 10, 25, 5, 31, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            schedule.refresh_from_db()
+            self.assertEqual(schedule.next_run, datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc))
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 11, 1, 5, 31, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run, datetime(2026, 11, 8, 6, 30, tzinfo=timezone.utc))
+
+    def test_daily_schedule_runs_twice_at_its_local_time_across_dst(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Daily work")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check",
+            next_run=datetime(2026, 3, 7, 14, tzinfo=timezone.utc), timezone="America/New_York",
+            repetition="daily", wall_time=time(9), preferred_model="test/model")
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            yield "Checked."
+
+        with patch("superharry.chat.stream_reply", side_effect=response) as gateway:
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 3, 7, 14, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            schedule.refresh_from_db()
+            self.assertEqual(schedule.next_run, datetime(2026, 3, 8, 13, tzinfo=timezone.utc))
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 3, 8, 13, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(gateway.call_count, 2)
+        self.assertEqual(list(schedule.occurrences.order_by("due_at").values_list("status", flat=True)), ["complete", "complete"])
+
     def test_restart_retries_reserved_but_not_submitted_occurrence(self):
         from superharry.models import ChatSubmission, Schedule, ScheduleOccurrence
 
