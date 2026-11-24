@@ -20,4 +20,4 @@ COPY tests/ tests/
 RUN DJANGO_SECRET_KEY=build-only python -m django collectstatic --noinput
 
 USER app
-CMD ["sh", "-ec", "python -m django migrate --noinput && python -m django bootstrap_recovery && exec gunicorn --no-control-socket --bind 0.0.0.0:8000 superharry.wsgi:application"]
+CMD ["sh", "-ec", "python -m django migrate --noinput && python -m django bootstrap_recovery && exec gunicorn --no-control-socket --threads 4 --bind 0.0.0.0:8000 superharry.wsgi:application"]

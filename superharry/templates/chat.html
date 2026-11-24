@@ -1,0 +1,48 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %} · SuperHarry2</title>
+  <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  <script src="{% static 'superharry/chat.js' %}" defer></script>
+</head>
+<body>
+  <aside>
+    <nav aria-label="Conversations">
+      <a href="{% url 'chat' %}">New chat</a>
+      <ul>
+        {% for item in conversations %}
+          <li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <form action="{% url 'logout' %}" method="post">
+      {% csrf_token %}
+      <button type="submit">Sign out</button>
+    </form>
+  </aside>
+  <main>
+    <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
+    <p>Model: {{ active_model|default:"Not configured" }}</p>
+    <section id="messages" aria-label="Messages">
+      {% for message in conversation.messages.all %}
+        <article>
+          <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+          <p>{{ message.content }}</p>
+          {% if not message.complete %}<small>Incomplete reply</small>{% endif %}
+        </article>
+      {% endfor %}
+    </section>
+    <p id="chat-status" role="status"></p>
+    <p><a id="chat-history" hidden>Open saved conversation</a></p>
+    <form id="composer" method="post" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
+      {% csrf_token %}
+      <label for="message">Message</label>
+      <textarea id="message" name="message" rows="3" required></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </main>
+</body>
+</html>

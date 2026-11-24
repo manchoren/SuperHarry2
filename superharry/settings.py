@@ -13,6 +13,8 @@ if not SECRET_KEY:
     raise ImproperlyConfigured("Set a nonempty Django signing key.")
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 ROOT_URLCONF = "superharry.urls"
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "chat"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "America/Guayaquil")
 USE_TZ = True
@@ -56,3 +58,12 @@ DATABASES = {
 }
 STATIC_URL = "/static/"
 STATIC_ROOT = Path(__file__).resolve().parent.parent / "staticfiles"
+
+OMNIROUTE_URL = os.environ.get("OMNIROUTE_URL", "")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "")
+inference_key_file = os.environ.get("OMNIROUTE_API_KEY_FILE")
+OMNIROUTE_API_KEY = (
+    Path(inference_key_file).read_text(encoding="utf-8").strip()
+    if inference_key_file
+    else ""
+)

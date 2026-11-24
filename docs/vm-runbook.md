@@ -10,6 +10,12 @@ Django applies migrations and creates the recovery account on first start. Compo
 
 Run `python -m tests.compose_smoke` on a host with Docker Compose and Python to verify login, static assets, the closed registration URL, and persistence across a restart. The test uses disposable credentials, a random localhost port, and an isolated Compose project.
 
+## Connect chat to an existing OmniRoute gateway
+
+Set `OMNIROUTE_URL` to the gateway base URL reachable from Django's container and `CHAT_MODEL` to the canonical route ID shown by that gateway. Put the inference key in `.secrets/omniroute_api_key` or set `OMNIROUTE_API_KEY_PATH` to its file path. Use an inference credential.
+
+Run `docker compose -f compose.yaml -f compose.omniroute.yaml up --build -d` and visit `http://127.0.0.1:8000/`. Sign in with an account created in Django admin. Run the commands from the same Compose project directory so both startup modes use the same SQLite volume.
+
 The following sections specify the full deployment workflow, including the OmniRoute installer and later milestone checks.
 
 ## Provision
