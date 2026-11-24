@@ -63,6 +63,8 @@ class VmSkill(models.Model):
     name = models.SlugField(max_length=48, unique=True)
     purpose = models.CharField(max_length=255)
     instructions = models.TextField()
+    files = models.JSONField(default=dict, blank=True)
+    dependencies = models.JSONField(default=list, blank=True)
 
 
 class CsvFile(models.Model):

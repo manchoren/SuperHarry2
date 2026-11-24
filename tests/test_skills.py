@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 
 
@@ -110,6 +111,66 @@ class SkillCatalogTests(TestCase):
         self.assertContains(detail, "render.py")
         self.assertContains(detail, "print(123)")
         self.assertContains(detail, "reportlab==4.0.0")
+
+    def test_administrator_can_edit_another_users_skill(self):
+        owner = get_user_model().objects.create_user(username="owner")
+        admin = get_user_model().objects.create_user(username="admin")
+        admin.groups.add(Group.objects.get(name="Administrators"))
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Original", "instructions": "Original",
+        })
+        self.client.force_login(admin)
+        response = self.client.post("/skills/report/edit/", {
+            "name": "report", "purpose": "Admin updated", "instructions": "Updated",
+            "files": '{"main.py": "print(1)"}', "dependencies": '["reportlab"]',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertContains(self.client.get("/skills/report/"), "Admin updated")
+
+    def test_owner_can_update_files_and_dependencies(self):
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Original",
+        })
+        response = self.client.post("/skills/report/edit/", {
+            "name": "report", "purpose": "Report", "instructions": "Updated",
+            "files": '{"render.py": "updated script"}', "dependencies": '["reportlab"]',
+        })
+        self.assertEqual(response.status_code, 302)
+        detail = self.client.get("/skills/report/")
+        self.assertContains(detail, "updated script")
+        self.assertContains(detail, "reportlab")
+
+    def test_administrator_can_delete_another_users_skill(self):
+        owner = get_user_model().objects.create_user(username="owner")
+        admin = get_user_model().objects.create_user(username="admin")
+        admin.groups.add(Group.objects.get(name="Administrators"))
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+        })
+        self.client.force_login(admin)
+        self.assertEqual(self.client.post("/skills/report/delete/").status_code, 302)
+        self.assertEqual(self.client.get("/skills/report/").status_code, 404)
+
+    def test_skill_files_reject_parent_directory_paths(self):
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        response = self.client.post("/skills/new/", {
+            "name": "unsafe", "purpose": "Test", "instructions": "Test",
+            "files": '{"../outside.py": "content"}', "dependencies": "[]",
+        })
+        self.assertContains(response, "Files must use safe relative names")
+        self.assertNotContains(self.client.get("/skills/"), "unsafe")
+
+    def test_empty_json_values_must_have_the_correct_types(self):
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        response = self.client.post("/skills/new/", {
+            "name": "invalid", "purpose": "Test", "instructions": "Test",
+            "files": "[]", "dependencies": "{}",
+        })
+        self.assertContains(response, "Enter a JSON object of file names and text.")
+        self.assertContains(response, "Enter a JSON array of dependency specifications.")
 
     def test_catalog_marks_a_collision_introduced_by_a_repository_update(self):
         self.client.force_login(get_user_model().objects.create_user(username="owner"))

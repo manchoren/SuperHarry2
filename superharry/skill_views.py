@@ -1,4 +1,5 @@
 import tomllib
+from pathlib import PurePosixPath
 
 from django import forms
 from django.contrib.auth.decorators import login_required
@@ -14,13 +15,41 @@ from .models import VmSkill
 class SkillForm(forms.ModelForm):
     class Meta:
         model = VmSkill
-        fields = ("name", "purpose", "instructions")
+        fields = ("name", "purpose", "instructions", "files", "dependencies")
+        help_texts = {
+            "files": 'JSON object mapping relative file names to text, e.g. {"main.py": "print(1)"}.',
+            "dependencies": 'JSON array of dependency specifications, e.g. ["reportlab==4.0.0"].',
+        }
 
     def clean_name(self):
         name = self.cleaned_data["name"]
         if (SKILLS_DIRECTORY / f"{name}.md").exists():
             raise forms.ValidationError("This name belongs to a repository skill.")
         return name
+
+    def clean_files(self):
+        files = self.cleaned_data.get("files")
+        if files is None:
+            files = {}
+        if not isinstance(files, dict):
+            raise forms.ValidationError("Enter a JSON object of file names and text.")
+        for name, content in files.items():
+            path = PurePosixPath(name)
+            if (not name or "\\" in name or path.is_absolute() or
+                any(part in (".", "..") for part in name.split("/")) or
+                not isinstance(content, str)):
+                raise forms.ValidationError("Files must use safe relative names and text content.")
+        return files
+
+    def clean_dependencies(self):
+        dependencies = self.cleaned_data.get("dependencies")
+        if dependencies is None:
+            dependencies = []
+        if not isinstance(dependencies, list) or any(
+            not isinstance(item, str) or not item.strip() for item in dependencies
+        ):
+            raise forms.ValidationError("Enter a JSON array of dependency specifications.")
+        return dependencies
 
 
 @never_cache

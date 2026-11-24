@@ -6,5 +6,11 @@
   <p>{{ skill.purpose }}</p>
   <h2>Instructions</h2>
   <pre>{{ skill.instructions }}</pre>
+  <h2>Files</h2>
+  {% for name, content in skill.files.items %}
+    <h3>{{ name }}</h3><pre>{{ content }}</pre>
+  {% empty %}<p>No files.</p>{% endfor %}
+  <h2>Dependencies</h2>
+  <ul>{% for dependency in skill.dependencies %}<li>{{ dependency }}</li>{% empty %}<li>None.</li>{% endfor %}</ul>
   <p><a href="{% url 'skills' %}">All skills</a></p>
 {% endblock %}
