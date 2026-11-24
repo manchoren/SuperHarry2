@@ -50,6 +50,8 @@ class ChatTests(TestCase):
         ))
 
     def test_new_chat_streams_reply_from_active_model(self):
+        saved = self.client.post("/memories/new/", {"content": "Private saved preference"})
+        self.assertRedirects(saved, "/memories/")
         response = self.client.post("/chat/send/", {"message": "Hi"})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.streaming)

@@ -1,0 +1,15 @@
+{% extends "memories/base.html" %}
+
+{% block content %}
+  <h1>Saved memories</h1>
+  <p><a href="{% url 'memory-create' %}">Add a memory</a></p>
+  {% for memory in memories %}
+    <article>
+      <p>{{ memory.content }}</p>
+      <a href="{% url 'memory-edit' memory.pk %}">Edit</a>
+      <a href="{% url 'memory-delete' memory.pk %}">Delete</a>
+    </article>
+  {% empty %}
+    <p>No saved memories yet.</p>
+  {% endfor %}
+{% endblock %}

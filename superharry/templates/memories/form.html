@@ -1,0 +1,13 @@
+{% extends "memories/base.html" %}
+
+{% block title %}{% if object %}Edit memory{% else %}Add a memory{% endif %}{% endblock %}
+
+{% block content %}
+  <h1>{% if object %}Edit memory{% else %}Add a memory{% endif %}</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save memory</button>
+    <a href="{% url 'memories' %}">Cancel</a>
+  </form>
+{% endblock %}

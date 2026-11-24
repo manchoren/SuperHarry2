@@ -7,6 +7,14 @@ class Conversation(models.Model):
     title = models.CharField(max_length=100)
 
 
+class SavedMemory(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    content = models.TextField()
+
+    class Meta:
+        ordering = ("-pk",)
+
+
 class Message(models.Model):
     class Role(models.TextChoices):
         USER = "user", "User"
