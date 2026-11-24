@@ -11,6 +11,7 @@ from django.utils import timezone
 from .chat import stream_message
 from .models import ChatRoute, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
+from .text_skills import text_skill
 
 
 def run_due():
@@ -35,6 +36,16 @@ def run_due():
             occurrence.save(update_fields=("status",))
             continue
 
+        try:
+            skill = text_skill(schedule.prompt)
+        except ValueError as failure:
+            occurrence.reply = schedule.conversation.messages.create(
+                role=Message.Role.ASSISTANT, content=f"Scheduled task failed: {failure}",
+            )
+            occurrence.status = "failed"
+            occurrence.save(update_fields=("reply", "status"))
+            continue
+
         def create_reply():
             if not Schedule.objects.filter(pk=schedule.pk, canceled=False, owner_id=schedule.conversation.owner_id).exists():
                 raise AdmissionDenied("The schedule is canceled or unavailable.", 409)
@@ -53,12 +64,16 @@ def run_due():
                     occurrence.delete()
             else:
                 occurrence.status = "skipped" if failure.status == 429 else "failed"
-                occurrence.save(update_fields=("status",))
+                occurrence.reply = schedule.conversation.messages.create(
+                    role=Message.Role.ASSISTANT,
+                    content=f"Scheduled task {occurrence.status}: {failure}",
+                )
+                occurrence.save(update_fields=("reply", "status"))
             continue
         occurrence.reply = submission.reply
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
-        for _ in stream_message(submission, schedule.preferred_model or ChatRoute.active_id(), limit, None, scheduled=True):
+        for _ in stream_message(submission, schedule.preferred_model or ChatRoute.active_id(), limit, skill, scheduled=True):
             pass
         submission.reply.refresh_from_db()
         occurrence.status = "complete" if submission.reply.complete else "interrupted"

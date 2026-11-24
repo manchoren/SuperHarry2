@@ -35,10 +35,13 @@
         {% if schedule.canceled %}<p>Canceled</p>
         {% elif schedule.next_run %}
           <p>{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
+        {% elif schedule.running %}<p>Running</p>
+        {% else %}<p>Submitted or finished</p>{% endif %}
+        {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
           <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
             {% csrf_token %}<button type="submit">Cancel schedule</button>
           </form>
-        {% else %}<p>Submitted or finished</p>{% endif %}
+        {% endif %}
       </article>
     {% endfor %}
     <section id="messages" aria-label="Messages">

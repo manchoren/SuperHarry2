@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from io import StringIO
 from unittest.mock import patch
 
@@ -11,6 +11,65 @@ from superharry.models import Conversation
 
 @override_settings(OMNIROUTE_URL="http://gateway", OMNIROUTE_API_KEY="key", CHAT_MODEL="test/model")
 class SchedulerTests(TestCase):
+    def test_cancel_after_submission_allows_the_response_to_finish(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+        self.client.force_login(owner)
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Cancel schedule")
+            self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/cancel/").status_code, 302)
+            yield "Completed after cancellation."
+
+        with patch("superharry.chat.stream_reply", side_effect=response):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "Completed after cancellation.")
+        self.assertContains(page, "Canceled")
+
+    def test_scheduled_reply_obeys_owner_response_cap(self):
+        from superharry.models import Schedule, UserChatLimits
+
+        owner = get_user_model().objects.create_user(username="owner")
+        UserChatLimits.objects.create(user=owner, max_response_characters=5)
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            yield "123456789"
+
+        with patch("superharry.chat.stream_reply", side_effect=response):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        self.client.force_login(owner)
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "12345")
+        self.assertNotContains(page, "123456")
+
+    def test_schedule_with_exhausted_quota_is_not_submitted(self):
+        from superharry.models import ChatSubmission, Schedule, UserChatLimits
+        owner = get_user_model().objects.create_user(username="owner")
+        UserChatLimits.objects.create(user=owner, daily_messages=1)
+        ChatSubmission.objects.create(owner=owner, fingerprint="used", active=False, submitted_day=date(2026, 1, 1))
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        schedule = Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
+        with patch("superharry.chat.stream_reply") as gateway:
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        gateway.assert_not_called()
+        self.assertEqual(schedule.occurrences.get().status, "skipped")
+        self.client.force_login(owner)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Scheduled task skipped: You have reached your daily message limit.")
+
     def test_only_owner_can_cancel_a_schedule_from_the_conversation(self):
         from superharry.models import Schedule
 

@@ -20,7 +20,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .gateway import GatewayFailure, available_routes, stream_reply
 from .memories import relevant_memory_excerpts
-from .models import ChatRoute, Conversation, Message, Schedule
+from .models import ChatRoute, Conversation, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
 from .text_skills import text_skill
 
@@ -87,7 +87,9 @@ def page(request, conversation_id=None):
         "history": history,
         "active_model": ChatRoute.active_id(),
         "submission_id": uuid4(),
-        "schedules": Schedule.objects.filter(owner=request.user, conversation=conversation) if conversation else (),
+        "schedules": Schedule.objects.filter(owner=request.user, conversation=conversation).annotate(
+            running=Exists(ScheduleOccurrence.objects.filter(schedule_id=OuterRef("pk"), status__in=("claimed", "running")))
+        ) if conversation else (),
     })
 
 

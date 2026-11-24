@@ -1,6 +1,7 @@
 services:
   scheduler:
     build: .
+    restart: unless-stopped
     command: ["sh", "-ec", "while :; do python -m django migrate --check >/dev/null 2>&1 && python -m django run_schedules || true; sleep 30; done"]
     environment:
       DJANGO_DATABASE_PATH: /data/db.sqlite3

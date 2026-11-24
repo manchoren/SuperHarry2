@@ -14,6 +14,40 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_schedule_uses_the_explicit_configured_model(self):
+        arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T12:00:00Z", "preferred_model": "test/alternate"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Review it later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(self.requests[-1][2]["model"], "test/alternate")
+        self.assertContains(self.client.get(response["Location"]), "Hello there")
+
+    def test_schedule_with_unavailable_text_skill_reports_failure(self):
+        arguments = json.dumps({"prompt": "/missing-skill notes", "due_at": "2099-01-01T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Do this later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertContains(self.client.get(response["Location"]), "Scheduled task failed: Unknown text skill.")
+
+    def test_scheduled_text_skill_uses_the_same_instructions_as_chat(self):
+        arguments = json.dumps({"prompt": "/summarize First draft notes", "due_at": "2099-01-01T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Summarize these notes later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        outbound = self.requests[-1][2]
+        self.assertEqual(outbound["messages"][-1], {"role": "user", "content": "First draft notes"})
+        self.assertIn("Summarize the user", outbound["messages"][0]["content"])
+        self.assertContains(self.client.get(response["Location"]), "Hello there")
+
     def test_model_creates_one_time_schedule_from_chat(self):
         arguments = json.dumps({"prompt": "Check the report", "due_at": "2099-01-01T12:00:00Z"})
         event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1", "type": "function", "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
@@ -48,6 +82,12 @@ class ChatTests(TestCase):
         gateway_responses = self.gateway_responses
 
         class Gateway(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"test/alternate"}]}')
+
             def do_POST(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append((self.path, self.headers.get("Authorization"), payload))
