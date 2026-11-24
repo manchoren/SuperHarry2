@@ -41,3 +41,11 @@ Let agents speak their responses aloud.
 **Idea**
 
 Let users interact with the agent through additional channels such as Telegram and email.
+
+### Image input with OCR fallback
+
+- [ ] Implemented
+
+**Idea**
+
+Let users send images to the agent. If the selected model cannot accept images, use optical character recognition (OCR) to extract the text and pass it to the model.
