@@ -1,0 +1,10 @@
+{% extends "memories/base.html" %}
+{% block title %}{{ skill.name }}{% endblock %}
+{% block content %}
+  <h1>{{ skill.name }}</h1>
+  <p>VM skill draft; execution is not yet available.</p>
+  <p>{{ skill.purpose }}</p>
+  <h2>Instructions</h2>
+  <pre>{{ skill.instructions }}</pre>
+  <p><a href="{% url 'skills' %}">All skills</a></p>
+{% endblock %}

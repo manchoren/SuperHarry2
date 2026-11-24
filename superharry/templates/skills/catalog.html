@@ -1,0 +1,21 @@
+{% extends "memories/base.html" %}
+{% block title %}Skills{% endblock %}
+{% block content %}
+  <h1>Skills</h1>
+  <p><a href="{% url 'skill-create' %}">Create a VM skill draft</a></p>
+  <ul>
+    {% for skill in skills %}
+      <li>{% if skill.origin == 'VM (draft)' %}<a href="{% url 'skill-detail' skill.name %}">{{ skill.name }}</a>{% else %}<a href="{% url 'repository-skill-detail' skill.name %}">{{ skill.name }}</a>{% endif %} — {{ skill.purpose }} ({{ skill.origin }})
+        {% if skill.conflict %}<strong>Name conflict</strong>{% endif %}
+        {% if skill.editable %}
+          <a href="{% url 'skill-edit' skill.name %}">Edit</a>
+          <form method="post" action="{% url 'skill-delete' skill.name %}">
+            {% csrf_token %}<button type="submit">Delete</button>
+          </form>
+        {% else %}read-only{% endif %}
+      </li>
+    {% empty %}
+      <li>No skills available.</li>
+    {% endfor %}
+  </ul>
+{% endblock %}

@@ -58,6 +58,13 @@ class SavedMemory(models.Model):
         ordering = ("-pk",)
 
 
+class VmSkill(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.SlugField(max_length=48, unique=True)
+    purpose = models.CharField(max_length=255)
+    instructions = models.TextField()
+
+
 class CsvFile(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)

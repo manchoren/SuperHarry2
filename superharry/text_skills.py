@@ -11,6 +11,9 @@ def text_skill(prompt):
     if not parts or not re.fullmatch(r"/[a-z][a-z0-9-]{0,47}", parts[0]):
         return None
     name = parts[0][1:]
+    from .models import VmSkill
+    if VmSkill.objects.filter(name=name).exists():
+        raise ValueError("This skill name conflicts with a VM skill.")
     try:
         definition = (SKILLS_DIRECTORY / f"{name}.md").read_text(encoding="utf-8")
     except FileNotFoundError:

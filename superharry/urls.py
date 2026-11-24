@@ -2,13 +2,19 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import chat, csv_views, inputs, memories
+from . import chat, csv_views, inputs, memories, skill_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
     path("memories/", memories.MemoryList.as_view(), name="memories"),
+    path("skills/", skill_views.catalog, name="skills"),
+    path("skills/new/", skill_views.create, name="skill-create"),
+    path("skills/repository/<slug:name>/", skill_views.repository_detail, name="repository-skill-detail"),
+    path("skills/<slug:name>/", skill_views.detail, name="skill-detail"),
+    path("skills/<slug:name>/edit/", skill_views.edit, name="skill-edit"),
+    path("skills/<slug:name>/delete/", skill_views.delete, name="skill-delete"),
     path("memories/new/", memories.MemoryCreate.as_view(), name="memory-create"),
     path("memories/<int:pk>/edit/", memories.MemoryEdit.as_view(), name="memory-edit"),
     path("memories/<int:pk>/delete/", memories.MemoryDelete.as_view(), name="memory-delete"),
