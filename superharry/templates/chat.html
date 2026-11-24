@@ -27,11 +27,21 @@
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
     <p>Model: {{ active_model|default:"Not configured" }}</p>
     <section id="messages" aria-label="Messages">
-      {% for message in conversation.messages.all %}
+      {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
           <p>{{ message.content }}</p>
-          {% if not message.complete %}<small>Incomplete reply</small>{% endif %}
+          {% if message.in_progress %}
+            <small>Reply in progress</small>
+          {% elif not message.complete %}
+            <small>Incomplete reply</small>
+            {% if message.prompt_id and not message.has_later_attempt %}
+              <form class="chat-retry" method="post" action="{% url 'chat-retry' conversation.pk message.pk %}">
+                {% csrf_token %}
+                <button type="submit">Retry reply</button>
+              </form>
+            {% endif %}
+          {% endif %}
         </article>
       {% endfor %}
     </section>

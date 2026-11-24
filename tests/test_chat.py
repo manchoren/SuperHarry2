@@ -1,4 +1,6 @@
 import json
+import re
+from collections import deque
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
@@ -11,20 +13,26 @@ class ChatTests(TestCase):
         user = get_user_model().objects.create_user(username="chat-user")
         self.client.force_login(user)
         self.requests = []
+        self.gateway_responses = deque()
         requests = self.requests
+        gateway_responses = self.gateway_responses
 
         class Gateway(BaseHTTPRequestHandler):
             def do_POST(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append((self.path, self.headers.get("Authorization"), payload))
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.end_headers()
-                self.wfile.write(
+                status, body = gateway_responses.popleft() if gateway_responses else (
+                    200,
                     b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
                     b'data: {"choices":[{"delta":{"content":" there"}}]}\n\n'
-                    b"data: [DONE]\n\n"
+                    b"data: [DONE]\n\n",
                 )
+                self.send_response(status)
+                self.send_header(
+                    "Content-Type", "text/event-stream" if status == 200 else "application/json"
+                )
+                self.end_headers()
+                self.wfile.write(body)
 
             def log_message(self, *args):
                 pass
@@ -103,3 +111,55 @@ class ChatTests(TestCase):
             "/login/?next=/chat/send/",
         )
         self.assertEqual(self.requests, [])
+
+    def test_interrupted_reply_can_be_retried_explicitly(self):
+        self.gateway_responses.append(
+            (200, b'data: {"choices":[{"delta":{"content":"Partial reply"}}]}\n\n')
+        )
+        interrupted = self.client.post("/chat/send/", {"message": "Original question"})
+        self.assertEqual(
+            [json.loads(chunk) for chunk in interrupted.streaming_content],
+            [{"text": "Partial reply"}, {"error": "The model reply was interrupted."}],
+        )
+        history = interrupted["Location"]
+        page = self.client.get(history)
+        self.assertContains(page, "Partial reply")
+        self.assertContains(page, "Incomplete reply")
+        form = re.search(r'<form class="chat-retry" method="post" action="([^"]+)"', page.content.decode())
+        self.assertIsNotNone(form)
+        retry_url = form.group(1)
+        self.assertEqual(len(self.requests), 1)
+
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="other-user"))
+        self.assertEqual(other.post(retry_url).status_code, 404)
+        self.assertEqual(len(self.requests), 1)
+
+        retry = self.client.post(retry_url)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual([json.loads(chunk) for chunk in retry.streaming_content][-1], {"done": True})
+        self.assertEqual(self.requests[0], self.requests[1])
+        page = self.client.get(history)
+        self.assertContains(page, "<p>Original question</p>", count=1, html=True)
+        self.assertContains(page, "Partial reply")
+        self.assertContains(page, "Hello there")
+        self.assertNotContains(page, "Retry reply")
+        self.assertEqual(self.client.post(retry_url).status_code, 409)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_free_route_failures_are_reported_without_fallback(self):
+        for status, expected in (
+            (429, "The free route has exhausted its quota or rate limit."),
+            (503, "The free route is currently unavailable."),
+        ):
+            with self.subTest(status=status):
+                self.gateway_responses.append((status, b'{"error":"private upstream details"}'))
+                previous = len(self.requests)
+                response = self.client.post("/chat/send/", {"message": "Hello"})
+                self.assertEqual(
+                    [json.loads(chunk) for chunk in response.streaming_content],
+                    [{"error": expected}],
+                )
+                self.assertContains(self.client.get(response["Location"]), "Incomplete reply")
+                self.assertEqual(len(self.requests), previous + 1)
+                self.assertEqual(self.requests[-1][2]["model"], "test/free-model")

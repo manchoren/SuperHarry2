@@ -36,17 +36,21 @@ async function readReply(body, output) {
   }
 }
 
-composer.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = composer.querySelector("button");
-  if (button.disabled || !input.value.trim()) return;
+const chatForms = [composer, ...document.querySelectorAll(".chat-retry")];
+const chatButtons = chatForms.map((form) => form.querySelector("button"));
 
-  const data = new FormData(composer);
-  button.disabled = true;
+async function submitChat(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const sendingMessage = form === composer;
+  if (chatButtons[0].disabled || (sendingMessage && !input.value.trim())) return;
+
+  const data = new FormData(form);
+  chatButtons.forEach((button) => { button.disabled = true; });
   input.readOnly = true;
   statusMessage.textContent = "Waiting for the model…";
   try {
-    const response = await fetch(composer.action, { method: "POST", body: data });
+    const response = await fetch(form.action, { method: "POST", body: data });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(error.error || "Your message could not be sent.");
@@ -57,9 +61,11 @@ composer.addEventListener("submit", async (event) => {
     const location = response.headers.get("Location");
     historyLink.href = location;
     historyLink.hidden = false;
-    appendMessage("You", data.get("message"));
+    if (sendingMessage) {
+      appendMessage("You", data.get("message"));
+      input.value = "";
+    }
     const output = appendMessage("Assistant", "");
-    input.value = "";
     statusMessage.textContent = "Receiving reply…";
     await readReply(response.body, output);
     window.location.assign(location);
@@ -68,7 +74,9 @@ composer.addEventListener("submit", async (event) => {
     // When the message has been saved, let the user reopen its conversation.
     if (historyLink.hidden) {
       input.readOnly = false;
-      button.disabled = false;
+      chatButtons.forEach((button) => { button.disabled = false; });
     }
   }
-});
+}
+
+chatForms.forEach((form) => form.addEventListener("submit", submitChat));

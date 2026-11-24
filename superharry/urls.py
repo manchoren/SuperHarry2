@@ -12,4 +12,5 @@ urlpatterns = [
     path("chat/<int:conversation_id>/", chat.page, name="chat-history"),
     path("chat/send/", chat.send, name="chat-send"),
     path("chat/<int:conversation_id>/send/", chat.send, name="chat-continue"),
+    path("chat/<int:conversation_id>/retry/<int:reply_id>/", chat.retry, name="chat-retry"),
 ]
