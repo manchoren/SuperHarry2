@@ -68,8 +68,10 @@ def provider_connections():
     ]
 
 
-def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None):
+def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=None):
     payload = {"model": route_id, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     request = Request(
@@ -93,12 +95,15 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None):
         raise GatewayFailure("The free route is currently unavailable.") from None
     except (URLError, TimeoutError):
         raise GatewayFailure("The free route is currently unavailable.") from None
+    calls = {}
     with response:
         for line in response:
             if not line.startswith(b"data:"):
                 continue
             data = line[5:].strip()
             if data == b"[DONE]":
+                for call in calls.values():
+                    yield {"tool_call": call}
                 return
             event = json.loads(data)
             error = event.get("error")
@@ -111,9 +116,23 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None):
                 break
             choices = event.get("choices")
             if choices:
-                content = choices[0].get("delta", {}).get("content")
+                delta = choices[0].get("delta", {})
+                content = delta.get("content")
                 if isinstance(content, str) and content:
                     yield content
+                for part in delta.get("tool_calls", []):
+                    index = part.get("index")
+                    if not isinstance(index, int) or not 0 <= index < 10:
+                        raise ValueError("Invalid tool call index.")
+                    call = calls.setdefault(index, {"name": "", "arguments": ""})
+                    function = part.get("function") or {}
+                    for key in ("name", "arguments"):
+                        fragment = function.get(key, "")
+                        if not isinstance(fragment, str):
+                            raise ValueError("Invalid tool call fragment.")
+                        call[key] += fragment
+                        if len(call[key]) > 65536:
+                            raise ValueError("Tool call too large.")
     raise OSError("The gateway stream ended before completion.")
 
 

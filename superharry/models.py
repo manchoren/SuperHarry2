@@ -115,3 +115,29 @@ class ChatSubmission(models.Model):
     def mark_submitted(self):
         self.submitted_day = timezone.localdate()
         self.save(update_fields=("submitted_day",))
+
+
+class Schedule(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE)
+    prompt = models.TextField()
+    next_run = models.DateTimeField(null=True)
+    timezone = models.CharField(max_length=64)
+    repetition = models.CharField(max_length=8)
+    preferred_model = models.CharField(max_length=255, blank=True)
+    canceled = models.BooleanField(default=False)
+
+    @property
+    def local_next_run(self):
+        from zoneinfo import ZoneInfo
+        return self.next_run.astimezone(ZoneInfo(self.timezone)) if self.next_run else None
+
+
+class ScheduleOccurrence(models.Model):
+    schedule = models.ForeignKey(Schedule, on_delete=models.CASCADE, related_name="occurrences")
+    due_at = models.DateTimeField()
+    status = models.CharField(max_length=24, default="claimed")
+    reply = models.ForeignKey(Message, null=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("schedule", "due_at"), name="unique_schedule_occurrence")]

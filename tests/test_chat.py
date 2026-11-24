@@ -2,16 +2,43 @@ import json
 import re
 from collections import deque
 from datetime import datetime, timezone
+from io import StringIO
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_model_creates_one_time_schedule_from_chat(self):
+        arguments = json.dumps({"prompt": "Check the report", "due_at": "2099-01-01T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1", "type": "function", "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Check the report later"})
+        list(response.streaming_content)
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "Check the report")
+        self.assertContains(page, "America/Guayaquil")
+        self.assertContains(page, "Cancel schedule")
+
+    def test_created_schedule_runs_and_reply_is_identified_in_chat(self):
+        arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T12:00:00Z"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1", "type": "function", "function": {"name": "create_schedule", "arguments": arguments}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Review it later"})
+        list(response.streaming_content)
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "Scheduled task #")
+        self.assertContains(page, "Hello there")
+        self.assertEqual(self.requests[-1][2]["model"], "test/free-model")
+        self.assertEqual(self.requests[-1][2]["messages"][-1]["content"], "Review the report")
+
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="chat-user")
         self.client.force_login(self.user)
@@ -71,6 +98,8 @@ class ChatTests(TestCase):
             [json.loads(chunk) for chunk in response.streaming_content],
             [{"text": "Hello"}, {"text": " there"}, {"done": True}],
         )
+        sent_tools = self.requests[0][2].pop("tools")
+        self.assertEqual(sent_tools[0]["function"]["name"], "create_schedule")
         self.assertEqual(self.requests, [(
             "/v1/chat/completions",
             "Bearer test-gateway-key",

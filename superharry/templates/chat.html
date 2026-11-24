@@ -1,4 +1,4 @@
-{% load static %}
+{% load static tz %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -28,10 +28,24 @@
   <main>
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
     <p>Model: {{ active_model|default:"Not configured" }}</p>
+    {% for schedule in schedules %}
+      <article>
+        <strong>Scheduled task #{{ schedule.pk }}</strong>
+        <p>{{ schedule.prompt }}</p>
+        {% if schedule.canceled %}<p>Canceled</p>
+        {% elif schedule.next_run %}
+          <p>{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
+          <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
+            {% csrf_token %}<button type="submit">Cancel schedule</button>
+          </form>
+        {% else %}<p>Submitted or finished</p>{% endif %}
+      </article>
+    {% endfor %}
     <section id="messages" aria-label="Messages">
       {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+          {% for occurrence in message.scheduleoccurrence_set.all %}<small>Scheduled task #{{ occurrence.schedule_id }}</small>{% endfor %}
           <p>{{ message.content }}</p>
           {% if message.in_progress %}
             <small>Reply in progress</small>

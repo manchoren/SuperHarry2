@@ -3,6 +3,8 @@ from contextlib import closing
 from hashlib import sha256
 from http.client import HTTPException
 from uuid import UUID, uuid4
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -12,14 +14,54 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from .gateway import GatewayFailure, stream_reply
+from .gateway import GatewayFailure, available_routes, stream_reply
 from .memories import relevant_memory_excerpts
-from .models import ChatRoute, Conversation, Message
+from .models import ChatRoute, Conversation, Message, Schedule
 from .quota import AdmissionDenied, admit
 from .text_skills import text_skill
+
+
+SCHEDULE_TOOL = {"type": "function", "function": {
+    "name": "create_schedule", "description": "Schedule a one-time follow-up in this conversation.",
+    "parameters": {"type": "object", "properties": {
+        "prompt": {"type": "string", "description": "Task and context for the future run"},
+        "due_at": {"type": "string", "description": "Future ISO 8601 timestamp with offset"},
+        "timezone": {"type": "string", "description": "IANA time zone"},
+        "preferred_model": {"type": "string", "description": "Optional configured model"},
+    }, "required": ["prompt", "due_at"], "additionalProperties": False},
+}}
+
+
+def create_schedule(call, submission, route_id):
+    if call.get("name") != "create_schedule":
+        raise ValueError("Unknown tool call.")
+    args = json.loads(call["arguments"])
+    if not isinstance(args, dict) or set(args) - {"prompt", "due_at", "timezone", "preferred_model"}:
+        raise ValueError("Invalid schedule arguments.")
+    prompt = args.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 65536:
+        raise ValueError("Invalid scheduled prompt.")
+    zone = args.get("timezone", settings.TIME_ZONE)
+    try:
+        if not isinstance(zone, str) or len(zone) > 64:
+            raise ValueError("Invalid time zone.")
+        ZoneInfo(zone)
+        due_at = datetime.fromisoformat(args["due_at"].replace("Z", "+00:00"))
+        if due_at.utcoffset() is None or due_at <= timezone.now():
+            raise ValueError("The scheduled time must be in the future and include an offset.")
+    except (KeyError, AttributeError, TypeError, ZoneInfoNotFoundError):
+        raise ValueError("Invalid schedule time or time zone.") from None
+    model = args.get("preferred_model", route_id)
+    if not isinstance(model, str) or not model or len(model) > 255:
+        raise ValueError("Invalid model.")
+    if model != route_id and model not in available_routes():
+        raise ValueError("The requested model is unavailable.")
+    return Schedule.objects.create(owner=submission.owner, conversation=submission.reply.conversation,
+        prompt=prompt, next_run=due_at, timezone=zone, repetition="once", preferred_model=model)
 
 
 @never_cache
@@ -45,7 +87,17 @@ def page(request, conversation_id=None):
         "history": history,
         "active_model": ChatRoute.active_id(),
         "submission_id": uuid4(),
+        "schedules": Schedule.objects.filter(owner=request.user, conversation=conversation) if conversation else (),
     })
+
+
+@never_cache
+@login_required
+@require_POST
+def cancel_schedule(request, schedule_id):
+    schedule = get_object_or_404(Schedule, pk=schedule_id, owner=request.user, conversation__owner=request.user)
+    Schedule.objects.filter(pk=schedule.pk, owner=request.user).update(canceled=True, next_run=None)
+    return redirect("chat-history", conversation_id=schedule.conversation_id)
 
 
 @never_cache
@@ -58,7 +110,7 @@ def memory_setting(request, conversation_id):
     return redirect("chat-history", conversation_id=conversation.pk)
 
 
-def stream_message(submission, route_id, max_response_characters, skill):
+def stream_message(submission, route_id, max_response_characters, skill, *, scheduled=False):
     reply = submission.reply
     complete = False
     error = "The model reply was interrupted."
@@ -89,9 +141,18 @@ def stream_message(submission, route_id, max_response_characters, skill):
             instructions, skill_input = skill
             context[-1]["content"] = skill_input
             context.insert(0, {"role": "system", "content": instructions})
-        upstream = stream_reply(context, route_id=route_id, on_submit=submission.mark_submitted)
+        kwargs = {"route_id": route_id, "on_submit": submission.mark_submitted}
+        if not scheduled and skill is None:
+            kwargs["tools"] = [SCHEDULE_TOOL]
+        upstream = stream_reply(context, **kwargs)
         with closing(upstream):
             for text in upstream:
+                if isinstance(text, dict) and "tool_call" in text:
+                    try:
+                        schedule = create_schedule(text["tool_call"], submission, route_id)
+                        text = f"Scheduled task #{schedule.pk}: {schedule.prompt} at {schedule.next_run.isoformat()} ({schedule.timezone}). Open this conversation to cancel it."
+                    except (ValueError, GatewayFailure, KeyError, TypeError):
+                        text = "The schedule could not be created. Check the requested time, time zone and model."
                 remaining = max_response_characters - len(reply.content)
                 text = text[:remaining]
                 reply.content += text

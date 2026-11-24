@@ -1,4 +1,11 @@
 services:
+  scheduler:
+    environment:
+      OMNIROUTE_URL: ${OMNIROUTE_URL:?Set the OmniRoute base URL}
+      CHAT_MODEL: ${CHAT_MODEL:?Set the canonical OmniRoute route ID}
+      OMNIROUTE_API_KEY_FILE: /run/secrets/omniroute_api_key
+    secrets:
+      - omniroute_api_key
   django:
     environment:
       OMNIROUTE_URL: ${OMNIROUTE_URL:?Set the OmniRoute base URL}

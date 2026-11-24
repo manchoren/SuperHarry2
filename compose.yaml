@@ -1,4 +1,17 @@
 services:
+  scheduler:
+    build: .
+    command: ["sh", "-ec", "while :; do python -m django migrate --check >/dev/null 2>&1 && python -m django run_schedules || true; sleep 30; done"]
+    environment:
+      DJANGO_DATABASE_PATH: /data/db.sqlite3
+      DJANGO_TIME_ZONE: ${DJANGO_TIME_ZONE:-America/Guayaquil}
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+    volumes:
+      - django_data:/data
+    secrets:
+      - django_secret_key
+    depends_on:
+      - django
   django:
     build: .
     ports:

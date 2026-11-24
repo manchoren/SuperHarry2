@@ -130,7 +130,7 @@ def provision(directory, env_file):
         env[variable] = str(path)
     save(directory / "omniroute_default_route", values["route"])
     env["CHAT_MODEL"] = values["route"]
-    compose(app + ["up", "--build", "-d", "django"], env)
+    compose(app + ["up", "--build", "-d", "django", "scheduler"], env)
     for _ in range(30):
         report = subprocess.run(app + [
             "exec", "-T", "django", "python", "-m", "django", "shell", "-c",

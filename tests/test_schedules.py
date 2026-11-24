@@ -1,0 +1,92 @@
+from datetime import datetime, timezone
+from io import StringIO
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.test import Client, TestCase, override_settings
+
+from superharry.models import Conversation
+
+
+@override_settings(OMNIROUTE_URL="http://gateway", OMNIROUTE_API_KEY="key", CHAT_MODEL="test/model")
+class SchedulerTests(TestCase):
+    def test_only_owner_can_cancel_a_schedule_from_the_conversation(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        stranger = get_user_model().objects.create_user(username="stranger")
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        schedule = Schedule.objects.create(
+            owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC", repetition="once", preferred_model="test/model",
+        )
+        other_client = Client()
+        other_client.force_login(stranger)
+        self.assertEqual(other_client.post(f"/schedules/{schedule.pk}/cancel/").status_code, 404)
+        self.client.force_login(owner)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Check the report")
+        self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/cancel/").status_code, 302)
+        schedule.refresh_from_db()
+        self.assertIsNone(schedule.next_run)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Canceled")
+
+    def test_active_response_delays_due_schedule(self):
+        from superharry.models import ChatSubmission, Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        ChatSubmission.objects.create(owner=owner, fingerprint="active")
+        schedule = Schedule.objects.create(
+            owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC", repetition="once", preferred_model="test/model",
+        )
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run, datetime(2026, 1, 1, 12, tzinfo=timezone.utc))
+
+    def test_schedule_over_one_hour_late_is_marked_missed_without_submission(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        schedule = Schedule.objects.create(
+            owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC", repetition="once", preferred_model="test/model",
+        )
+        with patch("superharry.chat.stream_reply") as gateway:
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 13, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        gateway.assert_not_called()
+        self.assertEqual(schedule.occurrences.get().status, "missed")
+
+    def test_due_one_time_schedule_posts_reply_only_once(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="owner")
+        conversation = Conversation.objects.create(owner=owner, title="Follow up")
+        Schedule.objects.create(
+            owner=owner, conversation=conversation, prompt="Check the report",
+            next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC", repetition="once", preferred_model="test/model",
+        )
+
+        def response(messages, *, route_id, on_submit):
+            on_submit()
+            yield "Report checked."
+
+        with patch("superharry.chat.stream_reply", side_effect=response) as gateway:
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+                call_command("run_schedules", stdout=StringIO())
+
+        self.assertEqual(gateway.call_count, 1)
+        self.client.force_login(owner)
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "Report checked.")
+        self.assertContains(page, "Check the report")
+        self.assertContains(page, "Scheduled task #")
