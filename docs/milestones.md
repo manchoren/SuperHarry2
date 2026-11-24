@@ -18,10 +18,10 @@ Docker suite, VM smoke test, and live provider results are recorded separately b
 
 ## 3. Skills and bundled execution
 
-- A repository-managed text skill runs through the normal chat interface.
-- A regular user can approve a proposed CSV summary for their own file and read the resulting output. Another user's files and unapproved requests are rejected.
-- Dedicated Linux VM checks verify job isolation, network denial, limits, and cleanup after success, failure, and timeout.
-- Model-generated execution has its own future milestone.
+- Repository and VM skills are discovered dynamically, and users can manage VM skill drafts according to ownership.
+- A skill can be prepared and executed in an isolated environment; prepared skills are available to users and results remain private to the submitting user.
+- The agent selects an appropriate skill through chat. A regular user can explicitly request a summary of their own CSV and read the result; attaching a file alone does not start processing.
+- Dedicated Linux VM checks verify job isolation, network denial or approved mediation as applicable, limits, and cleanup after success, failure, and timeout.
 
 ## Validation evidence
 
@@ -40,3 +40,8 @@ Docker suite, VM smoke test, and live provider results are recorded separately b
 - The worker contains Debian Sid Python `3.14.10-1`, which the [Debian tracker](https://security-tracker.debian.org/tracker/CVE-2026-18503) lists as fixed for the CSV dialect detection issue. The worker uses a fixed CSV dialect.
 - On 2026-11-24, `python3 -m tests.csv_runner_smoke` passed on the dedicated Debian 13 ARM64 VM after the runtime upgrade. Docker reported Engine CE `29.10.0`, `runc 1.5.3`, and `containerd 2.4.2`. The installed worker's script matched the checkout by SHA-256, and its installed Python package was `3.14.10-1`.
 - The deployed runtime supersedes the affected Debian trixie packages. The reviewed runc findings have fixes by `1.4.3` on the 1.4 branch, and `containerd 2.4.2` includes the reviewed fixes. CSV jobs use the prebuilt local worker image with pulls disabled and an explicit UID/GID of `10001:10001`. [Docker release notes](https://docs.docker.com/engine/release-notes/29/) · [Debian runc findings](https://security-tracker.debian.org/tracker/source-package/runc) · [Debian containerd findings](https://security-tracker.debian.org/tracker/source-package/containerd)
+
+### Skill runtime development checks
+
+- On 2026-11-24, controlled tests on Docker Desktop `4.100.1` with Engine `29.9.3`, `runc 1.5.3`, and `containerd 2.4.2` passed with the runtime gate enabled. The tests exercised the Windows host worker and a disposable Django container with a temporary database and spool, including offline preparation with a third-party `packaging==26.0` wheel, retry, execution, and result ownership.
+- The sandbox smoke test checked unprivileged execution, no network or application database, no Docker socket or credentials, read-only root, CPU, memory and process limits, bounded output, timeout, and container cleanup. These development checks did not deploy the feature to the running application and do not replace the separately tracked lifecycle and mediated-network acceptance.

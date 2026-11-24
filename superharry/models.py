@@ -67,6 +67,20 @@ class VmSkill(models.Model):
     dependencies = models.JSONField(default=list, blank=True)
 
 
+class SkillPreparation(models.Model):
+    skill = models.OneToOneField(VmSkill, on_delete=models.CASCADE, related_name="preparation")
+    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    fingerprint = models.CharField(max_length=64)
+    payload = models.JSONField()
+
+
+class SkillRun(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    skill = models.ForeignKey(VmSkill, null=True, on_delete=models.SET_NULL)
+    skill_name = models.CharField(max_length=48)
+    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+
 class CsvFile(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)

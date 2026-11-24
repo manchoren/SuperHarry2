@@ -2,7 +2,8 @@
 {% block title %}{{ skill.name }}{% endblock %}
 {% block content %}
   <h1>{{ skill.name }}</h1>
-  <p>VM skill draft; execution is not yet available.</p>
+  <p>VM skill.</p>
+  <p role="status">{{ preparation_status }}</p>
   <p>{{ skill.purpose }}</p>
   <h2>Instructions</h2>
   <pre>{{ skill.instructions }}</pre>
@@ -12,5 +13,25 @@
   {% empty %}<p>No files.</p>{% endfor %}
   <h2>Dependencies</h2>
   <ul>{% for dependency in skill.dependencies %}<li>{{ dependency }}</li>{% empty %}<li>None.</li>{% endfor %}</ul>
+  {% if can_manage and preparation_configured %}
+    <form method="post" action="{% url 'skill-prepare' skill.name %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <label for="entrypoint">Entrypoint file</label>
+      <select name="entrypoint" id="entrypoint" required>
+        {% for name in skill.files %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
+      <label for="wheels">Offline dependency wheels</label>
+      <input type="file" name="wheels" id="wheels" accept=".whl" multiple>
+      <button type="submit">Prepare or retry</button>
+    </form>
+  {% endif %}
+  {% if preparation_status == 'Prepared' %}
+    <form method="post" action="{% url 'skill-run' skill.name %}">
+      {% csrf_token %}
+      <label for="skill-input">Input for this execution</label>
+      <textarea name="input" id="skill-input"></textarea>
+      <button type="submit">Run skill</button>
+    </form>
+  {% endif %}
   <p><a href="{% url 'skills' %}">All skills</a></p>
 {% endblock %}

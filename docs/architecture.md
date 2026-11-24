@@ -24,9 +24,9 @@ Django admin lists available routes, adds or updates model entries on existing p
 
 Sending a chat message authorizes the selected provider to receive that message and the conversation context needed for the reply. Users explicitly save durable memories and can inspect, edit, or delete them. Include relevant saved memories in hosted requests only when the user enables memory for that conversation. Default to off and show the setting near the composer. Start with bounded retrieval from SQLite.
 
-Store skills as repository-managed Markdown with a declared purpose and allowed tools. Start with a text-only skill. For the first execution workflow, a skill can propose the bundled CSV summarizer and a user must approve running it on a specific file they own. Django validates the request and submits a job to a separate runner.
+Discover repository-managed skills and VM skill drafts dynamically. Repository definitions are read-only in the application; VM skills are managed by their owners or administrators and shared for use after preparation. Reject conflicting names. The agent-driven selection and lifecycle are tracked separately from the initial skill runtime.
 
-Run each job in a disposable environment with network disabled by default, no application credentials or Docker socket, and explicit CPU, memory, time, and output limits. Scope inputs and results to the approved job and clean up after execution. Model-generated programs are a later milestone with their own isolation acceptance.
+Prepare dependencies and execute skill scripts in disposable environments with no application credentials or Docker socket, and with explicit CPU, memory, time, and output limits. Pass only the inputs selected for each job and scope results to its owner. Before mediated network access is available, preparation uses supplied offline wheels and the sandbox has no network access. Later mediated access must require a specific user approval for transmitting user data, external effects, and requests whose effects are uncertain. The CSV workflow is to move into an agent-selected skill; an explicit request to summarize the user's file will authorize that isolated processing.
 
 ## Debian package findings
 

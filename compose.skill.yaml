@@ -1,0 +1,15 @@
+services:
+  django:
+    environment:
+      SKILL_SPOOL: /skill-jobs
+    volumes:
+      - type: bind
+        source: ${SKILL_SPOOL_DIRECTORY:?Set the dedicated skill spool directory}
+        target: /skill-jobs
+  scheduler:
+    environment:
+      SKILL_SPOOL: /skill-jobs
+    volumes:
+      - type: bind
+        source: ${SKILL_SPOOL_DIRECTORY:?Set the dedicated skill spool directory}
+        target: /skill-jobs

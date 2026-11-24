@@ -79,8 +79,12 @@ def provision(directory, env_file):
     upstream = provider_keys(env_file)
     env = dict(os.environ, OMNIROUTE_URL="http://omniroute:20128", COMPOSE_DISABLE_ENV_FILE="1")
     app = APP + (["-f", "compose.csv.yaml"] if env.get("CSV_SPOOL_DIRECTORY") else [])
+    if env.get("SKILL_SPOOL_DIRECTORY"):
+        app += ["-f", "compose.skill.yaml"]
     for name in PROVIDER_VARIABLES.values():
         env.pop(name, None)
+    if env.get("SKILL_SPOOL_DIRECTORY"):
+        compose(["docker", "build", "--target", "skill-worker", "-t", "superharry-skill-worker:local", "."], env)
     local_secrets = {
         **GATEWAY_SECRETS,
         "django_secret_key": "DJANGO_SECRET_KEY_PATH",

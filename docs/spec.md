@@ -6,7 +6,7 @@ The owner needs a locally operated chat application that saves conversations, st
 
 ## Solution
 
-Deliver chat and administration first, then saved memory, then repository-managed skills and an isolated CSV summarizer. Django provides the browser interface and owns application data. OmniRoute connects Django to model providers.
+Deliver chat and administration first, then saved memory, then dynamically discovered repository and VM skills with isolated execution. Move CSV summarization into an agent-selected skill. Django provides the browser interface and owns application data. OmniRoute connects Django to model providers.
 
 ## User Stories
 
@@ -24,10 +24,10 @@ Deliver chat and administration first, then saved memory, then repository-manage
 12. As the owner, I want provisioning reruns to preserve persistent state and administrator choices so I can repair an installation safely.
 13. As a regular user, I want to save, view, edit, and delete memories so I control what persists beyond chat history.
 14. As a regular user, I want a memory toggle near the composer that defaults to off per conversation so I control when relevant saved memories enter hosted requests.
-15. As a regular user, I want to invoke a repository-managed text skill through chat so I can use its workflow from the normal interface.
-16. As a regular user, I want to approve a CSV summary for a specific file I own and read the result so I control which file is processed.
+15. As a regular user, I want the agent to select an appropriate available skill through chat so I can use its workflow from the normal interface.
+16. As a regular user, I want to request a summary of a specific CSV I own and read the result so I control which file is processed.
 17. As a regular user, I want server-side ownership checks on my conversations, memories, files, and results so other users cannot access them.
-18. As the owner, I want execution jobs isolated, bounded, and cleaned up so each approved job has access only to its scoped inputs and results.
+18. As the owner, I want execution jobs isolated, bounded, and cleaned up so each job has access only to its scoped inputs and results.
 
 ## Implementation Decisions
 
@@ -37,22 +37,22 @@ Deliver chat and administration first, then saved memory, then repository-manage
 - Stream through OmniRoute's OpenAI-compatible chat endpoint. Seed the OpenRouter `google/gemma-4-26b-a4b-it:free` route and verify its canonical ID from the deployed gateway. Provision available OpenRouter, Groq, and Gemini connections from installer secrets. Disable paid fallback. Manage provider accounts, upstream credentials, and OAuth in OmniRoute. Give Django separate server-side inference and management credentials with the smallest supported management scope.
 - Provision the gateway on a private network, migrate Django, and bootstrap the recovery account. Repair missing configuration on reruns and preserve administrator choices. A live provider outage must allow Django and OmniRoute to start.
 - Store chat history and saved memory in separate models. Sending a message authorizes sending the conversation context needed for the reply. Use bounded SQLite retrieval for relevant memories from the conversation owner only when that conversation opts in.
-- Define skills as repository-managed Markdown with a declared purpose and allowed tools. Validate approval and file ownership before sending a bundled CSV summarizer job to a separate runner. Run each job in a disposable environment with network disabled by default, without application credentials or the Docker socket. Bound CPU, memory, runtime, and output and clean up job state.
+- Discover repository and VM skills dynamically, and enforce ownership when managing VM skill drafts. Run each job in a disposable environment without application credentials or the Docker socket. Bound CPU, memory, runtime, and output and clean up job state. Until mediated egress is implemented, deny sandbox network access and prepare dependencies from supplied offline wheels. Future network mediation must require specific approval for transmitting user data, external effects, and uncertain requests. A user must explicitly request a CSV summary and own the file.
 
 ## Testing Decisions
 
-- Use browser-facing Django views and admin actions as the primary test boundary, with a controlled OmniRoute fixture at the gateway boundary. Cover authentication, authorization, streaming, persistence, interrupted replies, explicit retry, route management, quota accounting, limits, and free route failures. The repository currently has no test suite.
+- Use browser-facing Django views and admin actions as the primary test boundary, with a controlled OmniRoute fixture at the gateway boundary. Cover authentication, authorization, streaming, persistence, interrupted replies, explicit retry, route management, quota accounting, limits, and free route failures.
 - In the dedicated Linux VM, smoke-test role-based login, persistence after Django restarts, admin route changes, denial of management calls using the inference credential, and provisioning reruns that preserve the selected route and state.
 - Record the Docker suite, VM smoke test, and live provider check separately. Verify a streamed reply through the seeded free route live. If the provider is unavailable, leave live verification pending and record the sanitized error.
-- Verify memory isolation and outbound request contents with the controlled gateway. Test the text skill and CSV approval through chat. In the Linux VM, verify job isolation, network denial, resource limits, and cleanup after success, failure, and timeout.
+- Verify memory isolation and outbound request contents with the controlled gateway. Test skill discovery, authorization, preparation and execution through public interfaces. In the Linux VM, verify job isolation, network denial or approved mediation as applicable, resource limits, and cleanup after success, failure, and timeout. Test CSV ownership and explicit summarization intent through chat when that migration is implemented.
 
 ## Out of Scope
 
-Public registration, paid fallback, provider-account setup through Django, and execution of model-generated programs are outside these milestones.
+Public registration, paid fallback, and provider-account setup through Django are outside these milestones.
 
 ## Further Notes
 
-Implementation and runtime verification are pending. Keep Debian package findings visible in scan reports and review findings that could compromise sandbox isolation or expose credentials before release.
+Track implementation and runtime verification separately in the milestones and issue tracker. Keep Debian package findings visible in scan reports and review findings that could compromise sandbox isolation or expose credentials before release.
 
 - [Architecture and agreed decisions](architecture.md)
 - [Milestones and acceptance criteria](milestones.md)

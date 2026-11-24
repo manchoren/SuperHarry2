@@ -46,6 +46,18 @@ Run `python3 scripts/run_csv_jobs.py --spool "$CSV_SPOOL_DIRECTORY"` as a host o
 
 Run `python3 -m tests.csv_runner_smoke` with Docker access on the dedicated Linux VM. The smoke test expects stable Docker daemon components at or above runc `1.4.3` and containerd `2.3.6`, then exercises network denial, read-only execution, resource bounds, and disposable cleanup. The floors reflect the reviewed [runc fix](https://security-tracker.debian.org/tracker/CVE-2026-41579) and [containerd fix](https://security-tracker.debian.org/tracker/CVE-2026-53493).
 
+### Isolated skill preparation and execution
+
+On a Docker host, use a dedicated skill spool directory accessible only to the application container and the host operator. On Linux, allow Django's UID 10001 to access it; on Windows, restrict the directory using Windows access controls. The spool contains skill source, dependency wheels, inputs, and results; do not share it with other users or services. Set `SKILL_SPOOL_DIRECTORY` to its absolute path; the provisioner and deployment helper include the skill overlay and build the disposable worker image when it is set. For manual Compose commands add `-f compose.skill.yaml` and build the worker with `docker build --target skill-worker -t superharry-skill-worker:local .`. Run `python3 scripts/run_skill_jobs.py --spool "$SKILL_SPOOL_DIRECTORY"` on Linux, or `python scripts/run_skill_jobs.py --spool $env:SKILL_SPOOL_DIRECTORY` in PowerShell, as a host operator with Docker access. Django itself does not receive the Docker socket.
+
+Owners or administrators can select a Python entrypoint and supply offline Python wheel files on a VM skill's details page. Dependency declarations currently accept package names and exact `==` versions; supply wheels for their transitive dependencies too. Preparation validates the files and installs those wheels without executing the skill; a failed preparation can be retried. Prepared skills can be run by signed-in users, with output visible only to the user who submitted that run. Changing a skill requires a new preparation. Network access remains disabled; automatic package acquisition and mediated network access are tracked separately.
+
+For now, the application rejects edits and deletion when it detects an active job. Restarting runs on update and stopping them on deletion are tracked separately; this interim check is not a substitute for that lifecycle work.
+
+On a Docker test host, build the worker and run `python3 -m tests.skill_sandbox_smoke` and `python3 -m tests.skill_preparation_smoke`. On Docker Desktop, `python -m tests.skill_desktop_smoke` additionally checks the shared spool between a disposable Django container and the host worker. These use synthetic inputs and a disposable Django database. The preparation and Desktop smoke tests enforce the worker's runtime gate by default. For functional diagnosis only, setting `SKILL_SMOKE_UNSUPPORTED_RUNTIME=1` bypasses that gate inside the test process; it does not change the operational worker or establish isolation acceptance.
+
+The host skill worker refuses to start unless Docker reports runc at least `1.4.3` and containerd at least `2.3.6`. A runtime failure leaves queued jobs unprocessed; inspect the installed Docker runtime before restarting the worker.
+
 ## Verify
 
 1. Run the Docker test suite with its controlled gateway fixture.

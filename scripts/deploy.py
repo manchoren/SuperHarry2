@@ -15,7 +15,8 @@ COMPOSE_FILES = (
     "compose.omniroute.yaml",
     "compose.omniroute-management.yaml",
 )
-BUILD_FILES = ("Dockerfile", ".dockerignore", "requirements.txt", *COMPOSE_FILES, "compose.csv.yaml")
+BUILD_FILES = ("Dockerfile", ".dockerignore", "requirements.txt", "skill_worker.py", *COMPOSE_FILES,
+               "compose.csv.yaml", "compose.skill.yaml")
 BUILD_DIRECTORIES = ("superharry", "tests")
 POLL_SECONDS = 1
 
@@ -40,6 +41,8 @@ def compose_command(env):
         command.extend(("-f", name))
     if env.get("CSV_SPOOL_DIRECTORY"):
         command.extend(("-f", "compose.csv.yaml"))
+    if env.get("SKILL_SPOOL_DIRECTORY"):
+        command.extend(("-f", "compose.skill.yaml"))
     return command
 
 
@@ -62,6 +65,9 @@ def fingerprint():
 
 def deploy(env):
     command = compose_command(env)
+    if env.get("SKILL_SPOOL_DIRECTORY"):
+        subprocess.run(["docker", "build", "--target", "skill-worker", "-t", "superharry-skill-worker:local", "."],
+                       cwd=ROOT, env=env, check=True)
     subprocess.run(command + ["up", "--build", "-d", "--no-deps", "django", "scheduler"],
                    cwd=ROOT, env=env, check=True)
     probe = (

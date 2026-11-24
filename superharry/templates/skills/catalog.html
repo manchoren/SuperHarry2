@@ -5,7 +5,8 @@
   <p><a href="{% url 'skill-create' %}">Create a VM skill draft</a></p>
   <ul>
     {% for skill in skills %}
-      <li>{% if skill.origin == 'VM (draft)' %}<a href="{% url 'skill-detail' skill.name %}">{{ skill.name }}</a>{% else %}<a href="{% url 'repository-skill-detail' skill.name %}">{{ skill.name }}</a>{% endif %} — {{ skill.purpose }} ({{ skill.origin }})
+      <li>{% if skill.is_vm %}<a href="{% url 'skill-detail' skill.name %}">{{ skill.name }}</a>{% else %}<a href="{% url 'repository-skill-detail' skill.name %}">{{ skill.name }}</a>{% endif %} — {{ skill.purpose }} ({{ skill.origin }})
+        {% if skill.status %}<span>{{ skill.status }}</span>{% endif %}
         {% if skill.conflict %}<strong>Name conflict</strong>{% endif %}
         {% if skill.editable %}
           <a href="{% url 'skill-edit' skill.name %}">Edit</a>
