@@ -49,3 +49,11 @@ Let users interact with the agent through additional channels such as Telegram a
 **Idea**
 
 Let users send images to the agent. If the selected model cannot accept images, use optical character recognition (OCR) to extract the text and pass it to the model.
+
+### Chat interface design refresh
+
+- [ ] Implemented
+
+**Idea**
+
+Review OpenAI's current ChatGPT web interface for inspiration. Refresh SuperHarry's CSS, typography, and dark mode with a visual style of its own.
