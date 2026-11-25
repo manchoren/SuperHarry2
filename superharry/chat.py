@@ -1,6 +1,7 @@
 import json
 import base64
 from contextlib import closing
+from dataclasses import dataclass
 from hashlib import sha256
 from http.client import HTTPException
 from uuid import UUID, uuid4
@@ -210,11 +211,18 @@ def memory_setting(request, conversation_id):
     return redirect("chat-history", conversation_id=conversation.pk)
 
 
-def stream_message(submission, route_id, max_response_characters, skill, *, scheduled=False, inputs=None):
+@dataclass(frozen=True)
+class ChatOutcome:
+    status: str
+    error: str = ""
+
+
+def execute_message(submission, route_id, max_response_characters, skill, *, scheduled=False, inputs=None):
     reply = submission.reply
     complete = False
     waiting_for_user = False
     error = "The model reply was interrupted."
+    failed = False
     try:
         # Prime the generator so Django can release the reservation even if
         # the response is closed before its body is handed to the client.
@@ -316,7 +324,7 @@ def stream_message(submission, route_id, max_response_characters, skill, *, sche
                     if needs_user_input:
                         waiting_for_user = True
                         event["needs_user_input"] = True
-                    yield json.dumps(event) + "\n"
+                    yield event
                     if capped or needs_user_input:
                         break
             if followup is None:
@@ -330,6 +338,7 @@ def stream_message(submission, route_id, max_response_characters, skill, *, sche
         complete = True
     except GatewayFailure as failure:
         error = str(failure)
+        failed = True
     except (OSError, ValueError, HTTPException):
         pass
     finally:
@@ -342,8 +351,20 @@ def stream_message(submission, route_id, max_response_characters, skill, *, sche
             submission.active = False
             submission.save(update_fields=("active",))
 
-    result = {"done": True} if complete else {"error": error}
-    yield json.dumps(result) + "\n"
+    status = "needs_user_input" if waiting_for_user else "complete" if complete else "failed" if failed else "interrupted"
+    yield ChatOutcome(status, "" if complete else error)
+
+
+def stream_message(submission, route_id, max_response_characters, skill):
+    execution = execute_message(submission, route_id, max_response_characters, skill)
+    with closing(execution):
+        for event in execution:
+            if event is None:
+                yield None
+            elif isinstance(event, ChatOutcome):
+                yield json.dumps({"error": event.error} if event.status in ("failed", "interrupted") or event.error else {"done": True}) + "\n"
+            else:
+                yield json.dumps(event) + "\n"
 
 
 def reply_response(submission, route_id, max_response_characters, skill):

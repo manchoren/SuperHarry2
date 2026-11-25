@@ -8,13 +8,12 @@ from tempfile import gettempdir
 from uuid import NAMESPACE_URL, uuid5
 import os
 import errno
-import json
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .chat import stream_message
+from .chat import ChatOutcome, execute_message
 from .gateway import GatewayFailure, available_routes
 from .models import ChatInput, ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
@@ -212,15 +211,11 @@ def _run_due():
         occurrence.reply = submission.reply
         occurrence.status = "running"
         occurrence.save(update_fields=("reply", "status"))
-        needs_user_input = False
-        failure_reason = ""
-        for event in stream_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
-            if event:
-                decoded = json.loads(event)
-                needs_user_input = needs_user_input or bool(decoded.get("needs_user_input"))
-                failure_reason = decoded.get("error", "") or failure_reason
-        submission.reply.refresh_from_db()
-        occurrence.status = "needs_user_input" if needs_user_input else "complete" if submission.reply.complete else "failed" if failure_reason and failure_reason != "The model reply was interrupted." else "interrupted"
-        occurrence.failure_reason = failure_reason if occurrence.status == "failed" else ""
+        outcome = None
+        for event in execute_message(submission, route, limit, skill, scheduled=True, inputs=[selected[item] for item in schedule.input_ids]):
+            if isinstance(event, ChatOutcome):
+                outcome = event
+        occurrence.status = outcome.status
+        occurrence.failure_reason = outcome.error if outcome.status == "failed" else ""
         occurrence.save(update_fields=("status", "failure_reason"))
         advance_schedule(occurrence)

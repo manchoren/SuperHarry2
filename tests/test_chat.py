@@ -29,7 +29,36 @@ class ChatTests(TestCase):
             call_command("run_schedules", stdout=StringIO())
         page = self.client.get(f"/chat/{conversation.pk}/")
         self.assertContains(page, "The free route has exhausted its quota or rate limit.")
-        self.assertEqual(schedule.occurrences.get().status, "failed")
+        occurrence = schedule.occurrences.get()
+        self.assertEqual(occurrence.status, "failed")
+        self.assertEqual(occurrence.failure_reason, "The free route has exhausted its quota or rate limit.")
+
+    def test_scheduled_interrupted_stream_preserves_partial_reply(self):
+        from superharry.models import Conversation, Schedule
+
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(
+            owner=self.user, conversation=conversation, prompt="Review",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC",
+            repetition="once", preferred_model="test/free-model",
+        )
+        self.gateway_responses.append(
+            (200, b'data: {"choices":[{"delta":{"content":"Partial reply"}}]}\n\n')
+        )
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        occurrence = schedule.occurrences.get()
+        self.assertEqual(occurrence.status, "interrupted")
+        self.assertEqual(occurrence.failure_reason, "")
+        self.assertEqual(occurrence.reply.content, "Partial reply")
+        self.assertFalse(occurrence.reply.complete)
+
+    def test_empty_gateway_error_remains_an_error_event(self):
+        from superharry.gateway import GatewayFailure
+
+        with patch("superharry.chat.stream_reply", side_effect=GatewayFailure("")):
+            response = self.client.post("/chat/send/", {"message": "Hello"})
+            self.assertEqual([json.loads(chunk) for chunk in response.streaming_content], [{"error": ""}])
 
     def test_initial_recurring_time_in_dst_gap_uses_first_valid_instant(self):
         arguments = json.dumps({"prompt": "Review", "due_at": "2026-03-08T02:30:00-05:00", "timezone": "America/New_York", "repetition": "daily"})
@@ -719,6 +748,23 @@ class ChatTests(TestCase):
         self.assertEqual(allowed.status_code, 200)
         list(allowed.streaming_content)
         self.assertEqual(len(self.requests), 1)
+
+    def test_closing_stream_after_partial_reply_releases_submission(self):
+        from superharry.models import ChatSubmission, Message
+
+        self.gateway_responses.append(
+            (200, b'data: {"choices":[{"delta":{"content":"Partial reply"}}]}\n\n'
+             b'data: {"choices":[{"delta":{"content":"Later"}}]}\n\n'
+             b'data: [DONE]\n\n')
+        )
+        response = self.client.post("/chat/send/", {"message": "Question"})
+        self.assertEqual(json.loads(next(response.streaming_content)), {"text": "Partial reply"})
+        response.close()
+        reply = Message.objects.get(role="assistant")
+        self.assertEqual(reply.content, "Partial reply")
+        self.assertFalse(reply.complete)
+        self.assertFalse(reply.in_progress)
+        self.assertFalse(ChatSubmission.objects.get(reply=reply).active)
 
     def test_interrupted_reply_can_be_retried_explicitly(self):
         self.gateway_responses.append(
