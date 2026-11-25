@@ -18,6 +18,212 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_chat_updates_its_own_skill(self):
+        from superharry.models import VmSkill
+        VmSkill.objects.create(owner=self.user, name="owned", purpose="Original", instructions="Original")
+        args = json.dumps({"name": "owned", "purpose": "Revised", "instructions": "Revised", "files": {}, "dependencies": ["packaging==26.0"]})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "edit-1", "function": {"name": "update_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Update my skill"})
+        self.assertIn("Skill updated", "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content))
+        self.assertEqual(VmSkill.objects.get(name="owned").dependencies, ["packaging==26.0"])
+
+    def test_chat_rejects_conflicting_skill_names(self):
+        from superharry.models import SkillRun, VmSkill
+        VmSkill.objects.create(owner=self.user, name="summarize", purpose="Conflict", instructions="Conflict", files={"main.py": "print('bad')"})
+        args = json.dumps({"name": "summarize", "input": "text"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Summarize"})
+            output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+        self.assertIn("conflict", output.lower())
+        self.assertFalse(SkillRun.objects.exists())
+
+    def test_scheduled_preparation_is_pending_until_the_worker_finishes(self):
+        from superharry.models import Conversation, Schedule, VmSkill
+        skill = VmSkill.objects.create(owner=self.user, name="prepare-demo", purpose="Demo", instructions="Demo", files={"main.py": "print('ok')"})
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Prepare demo",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "prepare-1", "function": {
+            "name": "prepare_skill", "arguments": json.dumps({"name": "prepare-demo", "entrypoint": "main.py"})}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            occurrence = schedule.occurrences.get()
+            self.assertEqual(occurrence.status, "awaiting_preparation")
+            (Path(directory) / f"{skill.preparation.job_id}.skill-result").write_text('{"status":"failed"}')
+            call_command("run_schedules", stdout=StringIO())
+            occurrence.refresh_from_db()
+            self.assertEqual(occurrence.status, "failed")
+            self.assertIn("preparation failed", occurrence.reply.content.lower())
+
+    def test_scheduled_unknown_skill_is_reported_as_failed(self):
+        from superharry.models import Conversation, Schedule
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Run missing skill",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run-1", "function": {
+            "name": "invoke_skill", "arguments": json.dumps({"name": "missing", "input": "data"})}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(schedule.occurrences.get().status, "failed")
+
+    def test_scheduled_skill_run_is_pending_until_the_worker_finishes(self):
+        from superharry.models import Conversation, Schedule, VmSkill
+        VmSkill.objects.create(owner=self.user, name="greet", purpose="Greet", instructions="Greet", files={"main.py": "print(input())"})
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Greet",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        args = json.dumps({"name": "greet", "input": "chosen"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.client.post("/skills/greet/prepare/", {"entrypoint": "main.py"})
+            preparation = VmSkill.objects.get(name="greet").preparation
+            (Path(directory) / f"{preparation.job_id}.skill-result").write_text('{"status":"complete"}')
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            occurrence = schedule.occurrences.get()
+            self.assertEqual(occurrence.status, "awaiting_skill")
+            (Path(directory) / f"{occurrence.skill_run.job_id}.skill-result").write_text('{"status":"complete","output":"Hello"}')
+            call_command("run_schedules", stdout=StringIO())
+            occurrence.refresh_from_db()
+            self.assertEqual(occurrence.status, "complete")
+            self.assertIn("Hello", occurrence.reply.content)
+
+    def test_scheduled_skill_worker_failure_is_reported(self):
+        from superharry.models import Conversation, Message, Schedule, ScheduleOccurrence, SkillRun, VmSkill
+        skill = VmSkill.objects.create(owner=self.user, name="greet", purpose="Greet", instructions="Greet")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Greet", timezone="UTC")
+        reply = Message.objects.create(conversation=conversation, role="assistant", content="Queued")
+        run = SkillRun.objects.create(owner=self.user, skill=skill, skill_name=skill.name)
+        occurrence = ScheduleOccurrence.objects.create(schedule=schedule, due_at=datetime(2099, 1, 1, tzinfo=timezone.utc), status="awaiting_skill", skill_run=run, reply=reply)
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            (Path(directory) / f"{run.job_id}.skill-result").write_text('{"status":"timeout"}')
+            call_command("run_schedules", stdout=StringIO())
+        occurrence.refresh_from_db()
+        self.assertEqual(occurrence.status, "failed")
+        self.assertIn("timed out", occurrence.reply.content)
+
+    def test_scheduled_skill_output_respects_the_response_limit(self):
+        from superharry.models import Conversation, Message, Schedule, ScheduleOccurrence, SkillRun, UserChatLimits, VmSkill
+        UserChatLimits.objects.create(user=self.user, max_response_characters=10)
+        skill = VmSkill.objects.create(owner=self.user, name="greet", purpose="Greet", instructions="Greet")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Greet", timezone="UTC")
+        reply = Message.objects.create(conversation=conversation, role="assistant", content="Queued")
+        run = SkillRun.objects.create(owner=self.user, skill=skill, skill_name=skill.name)
+        occurrence = ScheduleOccurrence.objects.create(schedule=schedule, due_at=datetime(2099, 1, 1, tzinfo=timezone.utc), status="awaiting_skill", skill_run=run, reply=reply)
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            (Path(directory) / f"{run.job_id}.skill-result").write_text('{"status":"complete","output":"abcdefghijklmnop"}')
+            call_command("run_schedules", stdout=StringIO())
+        occurrence.refresh_from_db()
+        self.assertEqual(occurrence.reply.content, "Queued\nabc")
+
+
+    def test_scheduled_chat_does_not_run_an_unprepared_skill(self):
+        from superharry.models import Conversation, Schedule, SkillRun, VmSkill
+        VmSkill.objects.create(owner=self.user, name="draft", purpose="Draft", instructions="Draft", files={"main.py": "print(input())"})
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Run the draft",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        args = json.dumps({"name": "draft", "input": "chosen"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+        self.assertFalse(SkillRun.objects.exists())
+        self.assertIn("Prepare this skill", schedule.occurrences.get().reply.content)
+        self.assertEqual(schedule.occurrences.get().status, "failed")
+
+    def test_scheduled_chat_creates_skill_for_schedule_owner(self):
+        from superharry.models import Conversation, Schedule, VmSkill
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Create a greeting skill",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        args = json.dumps({"name": "scheduled-greet", "purpose": "Greet", "instructions": "Greet", "files": {"main.py": "print(input())"}, "dependencies": []})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "create-1", "function": {"name": "create_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+            call_command("run_schedules", stdout=StringIO())
+        self.assertEqual(VmSkill.objects.get(name="scheduled-greet").owner, self.user)
+        self.assertEqual(schedule.occurrences.get().status, "complete")
+
+    def test_chat_invokes_a_prepared_shared_vm_skill(self):
+        from superharry.models import VmSkill
+        owner = get_user_model().objects.create_user(username="skill-owner")
+        VmSkill.objects.create(owner=owner, name="greet", purpose="Greet", instructions="Greet", files={"main.py": "print(input())"})
+        other = Client()
+        other.force_login(owner)
+        args = json.dumps({"name": "greet", "input": "chosen input"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            other.post("/skills/greet/prepare/", {"entrypoint": "main.py"})
+            preparation = VmSkill.objects.get(name="greet").preparation
+            (Path(directory) / f"{preparation.job_id}.skill-result").write_text('{"status":"complete"}')
+            response = self.client.post("/chat/send/", {"message": "Greet me"})
+            output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+            self.assertIn("/skill-runs/", output)
+            self.assertIn("/skill-runs/", json.dumps(self.requests[-1][2]["messages"]))
+
+    def test_chat_cannot_update_another_users_skill(self):
+        from superharry.models import VmSkill
+        owner = get_user_model().objects.create_user(username="other-owner")
+        VmSkill.objects.create(owner=owner, name="private", purpose="Original", instructions="Original")
+        args = json.dumps({"name": "private", "purpose": "Changed", "instructions": "Changed", "files": {}, "dependencies": []})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "edit-1", "function": {"name": "update_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Update private"})
+        list(response.streaming_content)
+        self.assertEqual(VmSkill.objects.get(name="private").purpose, "Original")
+        self.assertIn("cannot update", json.dumps(self.requests[-1][2]["messages"]))
+
+    def test_chat_can_prepare_an_owned_skill(self):
+        from superharry.models import VmSkill
+        VmSkill.objects.create(owner=self.user, name="greet", purpose="Greet", instructions="Greet", files={"main.py": "print(input())"})
+        args = json.dumps({"name": "greet", "entrypoint": "main.py"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "prepare-1", "function": {"name": "prepare_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Prepare my greeting skill"})
+            list(response.streaming_content)
+            self.assertContains(self.client.get("/skills/greet/"), "Preparation")
+            self.assertTrue(VmSkill.objects.get(name="greet").preparation)
+
+    def test_chat_creates_an_owned_skill_from_a_request(self):
+        args = json.dumps({"name": "greet", "purpose": "Greet", "instructions": "Greet the user", "files": {"main.py": "print(input())"}, "dependencies": []})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "create-1", "function": {"name": "create_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Create a greeting skill"})
+        output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+        self.assertIn("Created skill greet", output)
+        self.assertContains(self.client.get("/skills/greet/"), "Greet")
+        from superharry.models import VmSkill
+        self.assertEqual(VmSkill.objects.get(name="greet").owner, self.user)
+
+    def test_chat_invokes_repository_skill_without_a_slash_command(self):
+        args = json.dumps({"name": "summarize", "input": "A short note"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "skill-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Summarize my note"})
+        list(response.streaming_content)
+        self.assertEqual(self.requests[-1][2]["messages"][-1]["content"], "A short note")
+        self.assertNotIn("tools", self.requests[-1][2])
+
+    def test_chat_discovers_skills_for_a_natural_language_request(self):
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "skills-1", "function": {"name": "discover_skills", "arguments": "{}"}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {"message": "Find a way to summarize this text"})
+        self.assertEqual("".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content), "Hello there")
+        self.assertIn("summarize", json.dumps(self.requests[-1][2]["messages"]))
+
     def test_scheduled_gateway_quota_failure_is_visible_in_the_conversation(self):
         from superharry.models import Conversation, Schedule
 

@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from .chat import ChatOutcome, execute_message
 from .gateway import GatewayFailure, available_routes
-from .models import ChatInput, ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence
+from .models import ChatInput, ChatLimits, ChatRoute, ChatSubmission, Message, Schedule, ScheduleOccurrence, UserChatLimits
 from .quota import AdmissionDenied, admit
 from .schedule_time import next_occurrence
 from .text_skills import text_skill
@@ -76,6 +76,42 @@ def scheduler_lock():
 
 
 def recover_occurrences():
+    from .skill_jobs import result, spool
+    def append_result(occurrence, text):
+        if occurrence.reply:
+            maximum = ChatLimits.objects.get(pk=1).max_response_characters
+            override = UserChatLimits.objects.filter(user_id=occurrence.schedule.owner_id).first()
+            if override and override.max_response_characters is not None:
+                maximum = override.max_response_characters
+            remaining = max(0, maximum - len(occurrence.reply.content))
+            occurrence.reply.content += ("\n" + text)[:remaining]
+            occurrence.reply.save(update_fields=("content",))
+
+    for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_preparation").select_related("reply"):
+        outcome = result(spool(), occurrence.preparation_job) if occurrence.preparation_job else {"status": "failed"}
+        if outcome is None:
+            continue
+        success = outcome.get("status") == "complete"
+        text = "Skill preparation completed." if success else "Skill preparation failed or timed out."
+        with transaction.atomic():
+            append_result(occurrence, text)
+            occurrence.status = "complete" if success else "failed"
+            occurrence.failure_reason = "" if success else text
+            occurrence.save(update_fields=("status", "failure_reason"))
+    for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_skill").select_related("skill_run", "reply"):
+        outcome = result(spool(), occurrence.skill_run.job_id) if occurrence.skill_run else {"status": "failed"}
+        if outcome is None:
+            continue
+        success = outcome.get("status") == "complete"
+        text = outcome.get("output", "") if success else "Skill execution failed or timed out."
+        if not isinstance(text, str):
+            text = "Skill execution returned an invalid result."
+            success = False
+        with transaction.atomic():
+            append_result(occurrence, text)
+            occurrence.status = "complete" if success else "failed"
+            occurrence.failure_reason = "" if success else text
+            occurrence.save(update_fields=("status", "failure_reason"))
     for occurrence in ScheduleOccurrence.objects.filter(status__in=("claimed", "running")).select_related("schedule", "reply"):
         with transaction.atomic():
             submission = ChatSubmission.objects.filter(owner=occurrence.schedule.owner, key=occurrence_key(occurrence)).first()
@@ -84,6 +120,18 @@ def recover_occurrences():
             if submission is None and ChatSubmission.objects.filter(owner=occurrence.schedule.owner, active=True).exists():
                 continue
             reply = submission.reply if submission else occurrence.reply
+            if occurrence.skill_run_id or occurrence.preparation_job:
+                occurrence.status = "awaiting_skill" if occurrence.skill_run_id else "awaiting_preparation"
+                occurrence.save(update_fields=("status",))
+                if reply:
+                    reply.in_progress = False
+                    reply.complete = True
+                    reply.save(update_fields=("in_progress", "complete"))
+                if submission:
+                    submission.active = False
+                    submission.save(update_fields=("active",))
+                advance_schedule(occurrence)
+                continue
             if reply and (reply.complete or submission is None or submission.submitted_day):
                 occurrence.reply = reply
                 occurrence.status = "complete" if reply.complete else "interrupted"
@@ -113,12 +161,11 @@ def recover_occurrences():
 
 
 def run_due():
-    if not settings.OMNIROUTE_URL or not settings.OMNIROUTE_API_KEY:
-        return
     with scheduler_lock() as acquired:
         if acquired:
             recover_occurrences()
-            _run_due()
+            if settings.OMNIROUTE_URL and settings.OMNIROUTE_API_KEY:
+                _run_due()
 
 
 def _run_due():
