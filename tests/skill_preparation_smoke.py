@@ -26,9 +26,9 @@ def main():
         def process_once():
             if os.environ.get("SKILL_SMOKE_UNSUPPORTED_RUNTIME") == "1":
                 with patch("scripts.run_skill_jobs.validate_runtime"):
-                    supervise(root, once=True)
+                    supervise(root, once=True, image=os.environ.get("SKILL_TEST_IMAGE"))
             else:
-                supervise(root, once=True)
+                supervise(root, once=True, image=os.environ.get("SKILL_TEST_IMAGE"))
 
         call_command("migrate", verbosity=0, interactive=False)
         real_wheel = os.environ.get("SKILL_TEST_WHEEL")

@@ -1,6 +1,11 @@
 import base64
+import hashlib
+import json
+import os
 import re
 import tomllib
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from django import forms
@@ -14,7 +19,8 @@ from django.views.decorators.http import require_POST, require_safe
 from .text_skills import SKILLS_DIRECTORY
 from .models import SkillOutbox, SkillPreparation, SkillRun, VmSkill
 from .skill_files import validate_skill_files
-from .skill_jobs import dispatch_one, encode_job, result, skill_fingerprint, spool
+from .skill_jobs import dispatch_one, encode_job, pending_network_requests, result, skill_fingerprint, spool
+from .csv_protocol import read_limited
 
 
 class SkillForm(forms.ModelForm):
@@ -74,6 +80,8 @@ def preparation_status(skill):
         if outcome is None:
             return "Preparation failed"
     if outcome.get("status") == "complete":
+        if outcome.get("wheel_cache") and not (directory / f"{preparation.job_id}.skill-wheels").is_file():
+            return "Prepared dependencies unavailable; prepare again"
         return "Prepared"
     if outcome.get("status") == "timeout":
         return "Preparation timed out"
@@ -235,7 +243,17 @@ def run(request, name):
     input_text = request.POST.get("input", "")
     if len(input_text.encode("utf-8")) > 256 * 1024:
         return HttpResponse("Skill input exceeds the size limit.", status=400)
-    payload = {**preparation.payload, "operation": "run", "input": input_text}
+    try:
+        wheel_file = directory / f"{preparation.job_id}.skill-wheels"
+        if outcome.get("wheel_cache") or wheel_file.exists():
+            wheels = json.loads(read_limited(wheel_file, 8 * 1024 * 1024))
+            if not isinstance(wheels, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in wheels.items()):
+                raise ValueError("Invalid prepared dependencies")
+        else:
+            wheels = preparation.payload.get("wheels", {})
+    except (OSError, ValueError):
+        return HttpResponse("Prepared dependencies are unavailable; prepare this skill again.", status=409)
+    payload = {**preparation.payload, "operation": "run", "input": input_text, "wheels": wheels}
     identifier = uuid4()
     try:
         encode_job(payload)
@@ -262,7 +280,45 @@ def run_detail(request, job_id):
         (directory / f"{job.job_id}.{suffix}").exists() for suffix in ("skill-input", "skill-running")
     ):
         delivery = "pending"
-    return render(request, "skills/run_detail.html", {"job": job, "outcome": outcome, "delivery": delivery})
+    return render(request, "skills/run_detail.html", {
+        "job": job, "outcome": outcome, "delivery": delivery,
+        "network_requests": pending_network_requests(directory, job.job_id) if outcome is None else [],
+    })
+
+
+@never_cache
+@login_required
+@require_POST
+def network_decision(request, job_id, request_id):
+    job = get_object_or_404(SkillRun, job_id=job_id, owner=request.user)
+    directory = spool()
+    choice = request.POST.get("decision")
+    if choice not in ("approve", "deny"):
+        return HttpResponse("Invalid decision.", status=400)
+    if (directory is None or not (directory / f"{job_id}.skill-running").is_file()
+            or (directory / f"{job_id}.skill-result").exists()):
+        return HttpResponse("This request is no longer pending.", status=409)
+    path = directory / f"{job_id}.{request_id}.network-request"
+    try:
+        raw = read_limited(path, 64 * 1024)
+        digest = hashlib.sha256(raw).hexdigest()
+        if request.POST.get("digest") != digest:
+            return HttpResponse("The request has changed.", status=409)
+        if not any(action["id"] == request_id and action["digest"] == digest
+                   for action in pending_network_requests(directory, job_id)):
+            return HttpResponse("This request is no longer pending.", status=409)
+        data = json.dumps({"decision": choice, "digest": digest}).encode("ascii")
+        with NamedTemporaryFile(dir=directory, delete=False) as handle:
+            handle.write(data)
+            temp = Path(handle.name)
+        try:
+            temp.chmod(0o644)
+            os.link(temp, directory / f"{job_id}.{request_id}.network-decision")
+        finally:
+            temp.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        return HttpResponse("This request is no longer pending.", status=409)
+    return redirect("skill-run-detail", job_id=job.job_id)
 
 
 @never_cache

@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+from uuid import UUID
 
 from django.conf import settings
 from django.db import DatabaseError, connection, transaction
@@ -17,6 +18,35 @@ MAX_RESULT_BYTES = 100 * 1024
 
 def spool():
     return Path(settings.SKILL_SPOOL) if settings.SKILL_SPOOL else None
+
+
+def pending_network_requests(directory, job_id):
+    if directory is None:
+        return []
+    pending = []
+    for path in directory.glob(f"{job_id}.*.network-request"):
+        try:
+            request_id = UUID(path.name.split(".")[1])
+            if path.name != f"{job_id}.{request_id}.network-request":
+                continue
+            if (directory / f"{job_id}.{request_id}.network-decision").exists():
+                continue
+            raw = read_limited(path, 64 * 1024)
+            action = json.loads(raw)
+            if (not isinstance(action, dict) or set(action) not in ({"method", "url", "body"}, {"method", "url", "body", "headers"})
+                    or any(not isinstance(action[key], str) for key in ("method", "url", "body"))
+                    or not isinstance(action.get("headers", {}), dict)
+                    or any(not isinstance(k, str) or not isinstance(v, str) for k, v in action.get("headers", {}).items())):
+                continue
+            pending.append({
+                "id": request_id, "digest": hashlib.sha256(raw).hexdigest(), **action,
+                "display_url": json.dumps(action["url"], ensure_ascii=True),
+                "display_body": json.dumps(action["body"], ensure_ascii=True),
+                "display_headers": json.dumps(action.get("headers", {}), ensure_ascii=True, sort_keys=True),
+            })
+        except (OSError, ValueError, IndexError):
+            continue
+    return pending
 
 
 def skill_fingerprint(skill):

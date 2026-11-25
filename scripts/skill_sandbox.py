@@ -1,5 +1,6 @@
 """Run a single skill in a network-free Docker container."""
 import json
+import base64
 import subprocess
 import threading
 from uuid import UUID, uuid4
@@ -27,7 +28,7 @@ def remove_container(job_id):
         return False
 
 
-def run_skill(request, timeout=30, job_id=None):
+def run_skill(request, timeout=30, job_id=None, *, image="superharry-skill-worker:local", network_handler=None, package_handler=None, cancelled=None):
     try:
         payload = json.dumps(request, ensure_ascii=True).encode("utf-8")
     except (TypeError, ValueError):
@@ -42,10 +43,10 @@ def run_skill(request, timeout=30, job_id=None):
         "--memory-swap=128m", "--pids-limit=32", "--read-only", "--cap-drop=ALL",
         "--security-opt=no-new-privileges", "--user=10001:10001", "--log-driver=none",
         "--tmpfs=/work:rw,nosuid,nodev,size=16m,mode=1777",
-        "--tmpfs=/env:rw,nosuid,nodev,size=64m,mode=1777", "superharry-skill-worker:local",
+        "--tmpfs=/env:rw,nosuid,nodev,size=64m,mode=1777", image,
     ]
     try:
-        outcome = _execute(command, payload, timeout)
+        outcome = _execute(command, payload, timeout, network_handler, package_handler, cancelled)
     finally:
         cleanup_verified = remove_container(job_id)
     if not cleanup_verified:
@@ -53,25 +54,56 @@ def run_skill(request, timeout=30, job_id=None):
     return outcome
 
 
-def _execute(command, payload, timeout):
+def _execute(command, payload, timeout, network_handler=None, package_handler=None, cancelled=None):
     process = None
-    output = bytearray()
+    results = []
     overflow = threading.Event()
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
         def read_output():
-            while chunk := process.stdout.read(4096):
-                if len(output) + len(chunk) > MAX_RESPONSE:
-                    overflow.set()
+            count = 0
+            preparing = True
+            try:
+                while chunk := process.stdout.readline(MAX_RESPONSE + 1):
+                    if len(chunk) > MAX_RESPONSE:
+                        raise ValueError("Worker output too large")
+                    message = json.loads(chunk)
+                    if not isinstance(message, dict):
+                        raise ValueError("Invalid worker message")
+                    if message.get("kind") == "execution":
+                        preparing = False
+                    elif message.get("kind") in ("network", "package"):
+                        count += 1
+                        handler = (package_handler if message.get("kind") == "package" and preparing
+                                   else network_handler if message.get("kind") == "network" else None)
+                        if count > 64 or handler is None:
+                            response = {"status": "failed"}
+                        else:
+                            try:
+                                body = handler(message.get("action"))
+                                if not isinstance(body, bytes) or len(body) > 6 * 1024 * 1024:
+                                    raise ValueError("Invalid network response")
+                                response = {"status": "complete", "body": base64.b64encode(body).decode("ascii")}
+                            except (OSError, ValueError, TypeError):
+                                response = {"status": "failed"}
+                        process.stdin.write(json.dumps(response).encode("ascii") + b"\n")
+                        process.stdin.flush()
+                    else:
+                        results.append(message)
+                        if len(results) > 1:
+                            raise ValueError("Duplicate worker result")
+            except (OSError, ValueError, TypeError):
+                overflow.set()
+                try:
                     process.kill()
-                    break
-                output.extend(chunk)
+                except OSError:
+                    pass
 
         def write_input():
             try:
-                process.stdin.write(payload)
-                process.stdin.close()
+                process.stdin.write(payload + b"\n")
+                process.stdin.flush()
             except (OSError, ValueError):
                 pass
 
@@ -82,14 +114,20 @@ def _execute(command, payload, timeout):
         try:
             code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            if cancelled is not None:
+                cancelled.set()
             process.kill()
             process.wait(timeout=5)
             return {"status": "timeout"}
+        if cancelled is not None:
+            cancelled.set()
         reader.join(timeout=5)
         writer.join(timeout=5)
         if code != 0 or overflow.is_set() or reader.is_alive():
             return {"status": "failed"}
-        result = json.loads(output)
+        if len(results) != 1:
+            return {"status": "failed"}
+        result = results[0]
         if not isinstance(result, dict) or result.get("status") not in ("complete", "failed"):
             return {"status": "failed"}
         if result["status"] == "complete":
@@ -105,8 +143,15 @@ def _execute(command, payload, timeout):
     except (OSError, ValueError, subprocess.SubprocessError):
         return {"status": "failed"}
     finally:
+        if cancelled is not None:
+            cancelled.set()
         try:
             if process and process.poll() is None:
                 process.kill()
         except (OSError, subprocess.SubprocessError):
             pass
+        if process:
+            try:
+                process.stdin.close()
+            except (OSError, ValueError):
+                pass

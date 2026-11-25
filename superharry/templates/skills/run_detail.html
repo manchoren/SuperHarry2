@@ -7,5 +7,22 @@
   {% elif outcome.status == 'complete' %}<pre>{{ outcome.output }}</pre>
   {% elif outcome.status == 'timeout' %}<p>Execution timed out.</p>
   {% else %}<p>Execution failed.</p>{% endif %}
+  {% for action in network_requests %}
+    <section>
+      <h2>Network request awaiting approval</h2>
+      <p>Action: {{ action.method }}</p>
+      <p>Destination (JSON escaped): <code>{{ action.display_url }}</code></p>
+      <p>Headers (JSON escaped):</p><pre>{{ action.display_headers }}</pre>
+      <p>Data (JSON escaped):</p><pre>{{ action.display_body }}</pre>
+      <form method="post" action="{% url 'skill-network-decision' job.job_id action.id %}">
+        {% csrf_token %}<input type="hidden" name="digest" value="{{ action.digest }}">
+        <button name="decision" value="approve">Approve this request</button>
+        <button name="decision" value="deny">Deny</button>
+      </form>
+    </section>
+  {% endfor %}
+  {% if not outcome and not network_requests %}
+    <script>window.setTimeout(function () { window.location.reload(); }, 3000);</script>
+  {% endif %}
   {% if job.skill %}<p><a href="{% url 'skill-detail' job.skill.name %}">Skill details</a></p>{% endif %}
 {% endblock %}

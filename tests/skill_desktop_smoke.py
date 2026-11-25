@@ -1,9 +1,13 @@
 """Check Docker Desktop's Django-to-host-worker spool with disposable state."""
 import argparse
 import base64
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
+import threading
+import time
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import uuid4
@@ -43,11 +47,40 @@ def phase(action):
             other, _ = users.objects.get_or_create(username="desktop-other")
             client.force_login(other)
             assert client.get(location).status_code == 404
+        elif action == "prepare_network":
+            source = """from skill_network_client import request
+try:
+    request('POST', 'https://example.invalid/submit', 'private sample')
+except PermissionError:
+    print('handled')
+"""
+            response = client.post("/skills/new/", {
+                "name": "desktop-network", "purpose": "Network demo", "instructions": "Demo",
+                "files": json.dumps({"main.py": source}), "dependencies": "[]",
+            })
+            assert response.status_code == 302, response.status_code
+            assert client.post("/skills/desktop-network/prepare/", {"entrypoint": "main.py"}).status_code == 302
+        elif action == "run_network":
+            response = client.post("/skills/desktop-network/run/", {"input": ""})
+            assert response.status_code == 302, response.status_code
+            (spool / "network-result-path.txt").write_text(response["Location"], encoding="utf-8")
+        elif action == "approve_network":
+            location = (spool / "network-result-path.txt").read_text(encoding="utf-8")
+            pending = list(spool.glob("*.network-request"))
+            assert len(pending) == 1, pending
+            assert b"private sample" in client.get(location).content
+            request_id = pending[0].name.split(".")[1]
+            digest = hashlib.sha256(pending[0].read_bytes()).hexdigest()
+            response = client.post(f"{location}network/{request_id}/", {"decision": "approve", "digest": digest})
+            assert response.status_code == 302, response.status_code
+        elif action == "verify_network":
+            location = (spool / "network-result-path.txt").read_text(encoding="utf-8")
+            assert b"handled" in client.get(location).content
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=("prepare", "run", "verify"))
+    parser.add_argument("--phase", choices=("prepare", "run", "verify", "prepare_network", "run_network", "approve_network", "verify_network"))
     args = parser.parse_args()
     if args.phase:
         phase(args.phase)
@@ -76,9 +109,9 @@ def main():
             def process_once():
                 if os.environ.get("SKILL_SMOKE_UNSUPPORTED_RUNTIME") == "1":
                     with patch("scripts.run_skill_jobs.validate_runtime"):
-                        supervise(spool, once=True)
+                        supervise(spool, once=True, image=os.environ.get("SKILL_TEST_IMAGE"))
                 else:
-                    supervise(spool, once=True)
+                    supervise(spool, once=True, image=os.environ.get("SKILL_TEST_IMAGE"))
 
             docker_exec("python", "-m", "django", "migrate", "--noinput", "--verbosity", "0")
             docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "prepare")
@@ -86,6 +119,25 @@ def main():
             docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "run")
             process_once()
             docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "verify")
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "prepare_network")
+            process_once()
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "run_network")
+            errors = []
+            def process_network():
+                try:
+                    process_once()
+                except Exception as error:
+                    errors.append(error)
+            worker = threading.Thread(target=process_network)
+            worker.start()
+            deadline = time.monotonic() + 20
+            while not list(spool.glob("*.network-request")) and time.monotonic() < deadline and worker.is_alive():
+                time.sleep(0.1)
+            assert list(spool.glob("*.network-request")), errors
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "approve_network")
+            worker.join(30)
+            assert not worker.is_alive() and not errors, errors
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "verify_network")
             assert not list(spool.glob("*.skill-input")) and not list(spool.glob("*.skill-running"))
             print("Docker Desktop skill spool smoke passed.", flush=True)
         finally:

@@ -17,6 +17,7 @@ urlpatterns = [
     path("skills/<slug:name>/prepare/", skill_views.prepare, name="skill-prepare"),
     path("skills/<slug:name>/run/", skill_views.run, name="skill-run"),
     path("skill-runs/<uuid:job_id>/", skill_views.run_detail, name="skill-run-detail"),
+    path("skill-runs/<uuid:job_id>/network/<uuid:request_id>/", skill_views.network_decision, name="skill-network-decision"),
     path("skills/<slug:name>/delete/", skill_views.delete, name="skill-delete"),
     path("memories/new/", memories.MemoryCreate.as_view(), name="memory-create"),
     path("memories/<int:pk>/edit/", memories.MemoryEdit.as_view(), name="memory-edit"),

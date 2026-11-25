@@ -14,6 +14,7 @@ ENTRYPOINT ["/opt/venv/bin/python", "-IB", "/worker.py"]
 
 FROM python-base AS skill-worker
 COPY skill_worker.py /skill_worker.py
+COPY skill_network_client.py /skill_network_client.py
 COPY superharry/skill_files.py /skill_files.py
 USER app
 ENTRYPOINT ["/opt/venv/bin/python", "-EsB", "/skill_worker.py"]
