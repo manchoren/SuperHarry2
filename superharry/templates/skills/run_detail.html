@@ -2,7 +2,8 @@
 {% block title %}Skill result{% endblock %}
 {% block content %}
   <h1>Skill result: {{ job.skill_name }}</h1>
-  {% if not outcome %}<p role="status">Execution pending</p>
+  {% if not outcome and delivery == 'publishing' %}<p role="status">Delivery outcome uncertain or publication in progress; operator investigation required. Job: <code>{{ job.job_id }}</code></p>
+  {% elif not outcome %}<p role="status">Execution pending</p>
   {% elif outcome.status == 'complete' %}<pre>{{ outcome.output }}</pre>
   {% elif outcome.status == 'timeout' %}<p>Execution timed out.</p>
   {% else %}<p>Execution failed.</p>{% endif %}

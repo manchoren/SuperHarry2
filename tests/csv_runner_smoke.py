@@ -1,5 +1,4 @@
 import json
-import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,6 +6,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from scripts import run_csv_jobs
+from scripts.runtime_policy import check_component_versions
 from superharry.csv_protocol import enqueue
 
 
@@ -49,13 +49,10 @@ def check_runtime():
         ["docker", "version", "--format", "{{json .Server.Components}}"], text=True, timeout=15
     ))
     versions = {entry["Name"]: entry["Version"] for entry in components}
-    for component, required in (("runc", (1, 4, 3)), ("containerd", (2, 3, 6))):
-        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?", versions.get(component, ""))
-        if not match or tuple(map(int, match.groups())) < required:
-            raise SystemExit(
-                f"CSV release verification requires {component} "
-                f">= {'.'.join(map(str, required))}; daemon reports {versions.get(component)}."
-            )
+    try:
+        check_component_versions(versions)
+    except ValueError as error:
+        raise SystemExit(f"CSV release verification rejected runtime: {error}") from error
     print(f"CSV runtime verified: runc {versions['runc']}, containerd {versions['containerd']}.")
 
 

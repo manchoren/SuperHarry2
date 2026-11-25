@@ -47,7 +47,9 @@ def run_job(job_id, payload, timeout=15):
         remove_container(job_id)
         return {"status": "timeout"}
     except subprocess.CalledProcessError as error:
-        if error.returncode in (-signal.SIGALRM, 128 + signal.SIGALRM):
+        # The worker is a Linux container even when the Docker host is Windows.
+        alarm_signal = getattr(signal, "SIGALRM", 14)
+        if error.returncode in (-alarm_signal, 128 + alarm_signal):
             return {"status": "timeout"}
         return {"status": "failed"}
     except (OSError, ValueError):

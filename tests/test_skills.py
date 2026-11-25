@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -9,10 +10,11 @@ from django.db import transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 
 
-class SkillCatalogTests(TestCase):
+class SkillCatalogTests(TransactionTestCase):
+    serialized_rollback = True
+
     def post_job(self, url, data):
-        with self.captureOnCommitCallbacks(execute=True):
-            return self.client.post(url, data)
+        return self.client.post(url, data)
 
     def test_worker_rejects_unsupported_or_unverifiable_docker_runtimes(self):
         from scripts.run_skill_jobs import validate_runtime
@@ -369,6 +371,233 @@ class SkillCatalogTests(TestCase):
                 transaction.set_rollback(True)
             self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
 
+    def test_recovery_publishes_committed_preparation_once_after_callback_is_lost(self):
+        from django.core.management import call_command
+        from scripts.run_skill_jobs import process_queue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                response = self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            self.assertContains(self.client.get("/skills/report/"), "Delivery pending")
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(len(list(Path(directory).glob("*.skill-input"))), 1)
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}) as worker:
+                process_queue(Path(directory))
+                call_command("recover_skill_dispatch", verbosity=0)
+                process_queue(Path(directory))
+            self.assertEqual(worker.call_count, 1)
+            self.assertContains(self.client.get("/skills/report/"), "Prepared")
+
+    def test_recovery_never_publishes_after_preparation_owner_is_deleted(self):
+        from django.core.management import call_command
+
+        owner = get_user_model().objects.create_user(username="owner")
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            owner.delete()
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+
+    def test_recovery_never_publishes_after_requesting_user_is_deleted(self):
+        from django.core.management import call_command
+        from scripts.run_skill_jobs import process_queue
+
+        owner = get_user_model().objects.create_user(username="owner")
+        requester = get_user_model().objects.create_user(username="requester")
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(Path(directory))
+            self.client.force_login(requester)
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                self.client.post("/skills/report/run/", {"input": "private"})
+            requester.delete()
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            self.assertTrue(get_user_model().objects.filter(pk=owner.pk).exists())
+
+    def test_recovery_never_publishes_after_preparing_administrator_is_deleted(self):
+        from django.core.management import call_command
+
+        owner = get_user_model().objects.create_user(username="owner")
+        administrator = get_user_model().objects.create_user(username="administrator")
+        administrator.groups.add(Group.objects.get(name="Administrators"))
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.client.force_login(administrator)
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            administrator.delete()
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            self.assertTrue(get_user_model().objects.filter(pk=owner.pk).exists())
+
+    def test_recovery_never_publishes_a_run_after_its_skill_is_deleted(self):
+        from django.core.management import call_command
+        from scripts.run_skill_jobs import process_queue
+        from superharry.models import VmSkill
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(Path(directory))
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                response = self.client.post("/skills/report/run/", {"input": "private"})
+            VmSkill.objects.get(name="report").delete()
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            self.assertContains(self.client.get(response["Location"]), "Execution failed")
+
+    def test_recovery_does_not_republish_after_crash_after_publication(self):
+        from django.core.management import call_command
+        from scripts.run_skill_jobs import process_queue
+        from superharry.skill_jobs import enqueue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        def publish_then_crash(directory, identifier, payload):
+            enqueue(directory, identifier, payload)
+            raise OSError("simulated crash after publication")
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_jobs.enqueue", side_effect=publish_then_crash):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            self.assertEqual(len(list(Path(directory).glob("*.skill-input"))), 1)
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}) as worker:
+                process_queue(Path(directory))
+                call_command("recover_skill_dispatch", verbosity=0)
+                process_queue(Path(directory))
+            self.assertEqual(worker.call_count, 1)
+            self.assertContains(self.client.get("/skills/report/"), "Prepared")
+
+    def test_uncertain_publication_is_not_retried_automatically(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from superharry.models import SkillOutbox
+        from superharry.skill_jobs import dispatch_one
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_jobs.enqueue", side_effect=OSError("simulated crash before publication")):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            identifier = SkillOutbox.objects.get().job_id
+            self.assertContains(self.client.get("/skills/report/"), "Delivery outcome uncertain")
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            with self.assertRaises(CommandError):
+                call_command("recover_skill_dispatch", mark_uncertain_failed=str(identifier))
+            call_command("recover_skill_dispatch", mark_uncertain_failed=str(identifier), confirm_no_running_container=True)
+            self.assertFalse(dispatch_one(identifier))
+            self.assertEqual(list(Path(directory).glob("*.skill-input")), [])
+            self.assertContains(self.client.get("/skills/report/"), "Preparation failed")
+            self.assertEqual(self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"}).status_code, 302)
+
+    def test_resolution_refuses_a_job_already_claimed_by_the_worker(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from superharry.models import SkillOutbox
+        from superharry.skill_jobs import enqueue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        def publish_then_crash(directory, identifier, payload):
+            enqueue(directory, identifier, payload)
+            raise OSError("simulated interruption")
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_jobs.enqueue", side_effect=publish_then_crash):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            outbox = SkillOutbox.objects.get()
+            incoming = Path(directory) / f"{outbox.job_id}.skill-input"
+            running = Path(directory) / f"{outbox.job_id}.skill-running"
+            incoming.replace(running)
+            with self.assertRaises(CommandError):
+                call_command("recover_skill_dispatch", mark_uncertain_failed=str(outbox.job_id), confirm_no_running_container=True)
+            self.assertTrue(running.exists())
+            self.assertEqual(SkillOutbox.objects.get().state, "publishing")
+            call_command("recover_skill_dispatch", verbosity=0)
+            self.assertFalse(incoming.exists())
+            self.assertTrue(running.exists())
+            self.assertFalse(SkillOutbox.objects.exists())
+
+    def test_resolution_cannot_race_a_live_publisher(self):
+        from django.db import DatabaseError, close_old_connections
+        from superharry.models import SkillOutbox
+        from superharry.skill_jobs import dispatch_one, enqueue, resolve_uncertain
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(1)"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.skill_views.dispatch_one", return_value=False):
+                self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
+            identifier = SkillOutbox.objects.get().job_id
+            entered, release = threading.Event(), threading.Event()
+            outcomes = []
+
+            def delayed_publish(path, job_id, payload):
+                entered.set()
+                if not release.wait(10):
+                    raise RuntimeError("Publisher was not released")
+                enqueue(path, job_id, payload)
+
+            def publisher():
+                try:
+                    outcomes.append(dispatch_one(identifier))
+                finally:
+                    close_old_connections()
+
+            with patch("superharry.skill_jobs.enqueue", side_effect=delayed_publish):
+                thread = threading.Thread(target=publisher)
+                thread.start()
+                try:
+                    self.assertTrue(entered.wait(10))
+                    with self.assertRaises((DatabaseError, ValueError)):
+                        resolve_uncertain(identifier)
+                finally:
+                    release.set()
+                    thread.join(10)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(outcomes, [True])
+            self.assertEqual(len(list(Path(directory).glob("*.skill-input"))), 1)
+
     def test_active_job_prevents_skill_edit_or_deletion(self):
         from scripts.run_skill_jobs import process_queue
 
@@ -435,5 +664,5 @@ class SkillCommitTests(TransactionTestCase):
         })
         with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=str(Path(directory) / "missing")):
             response = self.client.post("/skills/report/prepare/", {"entrypoint": "main.py"})
-            self.assertEqual(response.status_code, 503)
-            self.assertContains(self.client.get("/skills/report/"), "Preparation failed")
+            self.assertEqual(response.status_code, 302)
+            self.assertContains(self.client.get("/skills/report/"), "Delivery outcome uncertain")

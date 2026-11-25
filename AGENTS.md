@@ -11,3 +11,7 @@ Read [the triage label mapping](docs/agents/triage-labels.md) before interpretin
 ### Domain docs
 
 Read [the single-context domain documentation guide](docs/agents/domain.md) before exploring the domain or proposing changes to it.
+
+### Implementation and validation
+
+Read [the implementation and validation guide](docs/agents/implementation.md) before implementing a ticket or testing the Docker runtime.

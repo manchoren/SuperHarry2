@@ -6,7 +6,7 @@ The owner needs a locally operated chat application that saves conversations, st
 
 ## Solution
 
-Deliver chat and administration first, then saved memory, then dynamically discovered repository and VM skills with isolated execution. Move CSV summarization into an agent-selected skill. Django provides the browser interface and owns application data. OmniRoute connects Django to model providers.
+Deliver chat and administration first, then saved memory, then dynamically discovered repository and locally stored skills with isolated execution. Move CSV summarization into an agent-selected skill. Django provides the browser interface and owns application data. OmniRoute connects Django to model providers.
 
 ## User Stories
 
@@ -31,20 +31,20 @@ Deliver chat and administration first, then saved memory, then dynamically disco
 
 ## Implementation Decisions
 
-- Use Django templates and client-side streaming. Run Compose on Windows with Django bound to localhost, and reuse Compose in a dedicated Linux VM. Build Django on a tested, pinned Debian Sid slim digest. Persist SQLite and OmniRoute state in Docker volumes. Keep SQLite write transactions short and revisit PostgreSQL before concurrent use or multiple database-writing workers.
+- Use Django templates and client-side streaming. Run Compose with Docker Desktop on Windows and bind Django to localhost. Build Django on a tested, pinned Debian Sid slim digest. Persist SQLite and OmniRoute state in Docker volumes. Keep SQLite write transactions short and revisit PostgreSQL before concurrent use or multiple database-writing workers.
 - Keep registration closed. Use built-in Django admin with explicit administrator permissions and superuser-only privilege grants. Enforce ownership on history, downloads, and other data access. Keep private chats out of routine admin views.
 - Allow one active response per user. Enforce daily message and maximum response length limits, with per-user overrides. Reset the daily counter at midnight in the deployment timezone, initially `America/Guayaquil`. Count each submission to OmniRoute once. Persist partial replies and mark interrupted turns incomplete.
 - Stream through OmniRoute's OpenAI-compatible chat endpoint. Seed the OpenRouter `google/gemma-4-26b-a4b-it:free` route and verify its canonical ID from the deployed gateway. Provision available OpenRouter, Groq, and Gemini connections from installer secrets. Disable paid fallback. Manage provider accounts, upstream credentials, and OAuth in OmniRoute. Give Django separate server-side inference and management credentials with the smallest supported management scope.
 - Provision the gateway on a private network, migrate Django, and bootstrap the recovery account. Repair missing configuration on reruns and preserve administrator choices. A live provider outage must allow Django and OmniRoute to start.
 - Store chat history and saved memory in separate models. Sending a message authorizes sending the conversation context needed for the reply. Use bounded SQLite retrieval for relevant memories from the conversation owner only when that conversation opts in.
-- Discover repository and VM skills dynamically, and enforce ownership when managing VM skill drafts. Run each job in a disposable environment without application credentials or the Docker socket. Bound CPU, memory, runtime, and output and clean up job state. Until mediated egress is implemented, deny sandbox network access and prepare dependencies from supplied offline wheels. Future network mediation must require specific approval for transmitting user data, external effects, and uncertain requests. A user must explicitly request a CSV summary and own the file.
+- Discover repository and locally stored skills dynamically, and enforce ownership when managing local skill drafts. The current interface calls application-managed local skills “VM skills”; they do not require a separate VM. Run each job in a disposable environment without application credentials or the Docker socket. Bound CPU, memory, runtime, and output and clean up job state. Until mediated egress is implemented, deny sandbox network access and prepare dependencies from supplied offline wheels. Future network mediation must require specific approval for transmitting user data, external effects, and uncertain requests. A user must explicitly request a CSV summary and own the file.
 
 ## Testing Decisions
 
 - Use browser-facing Django views and admin actions as the primary test boundary, with a controlled OmniRoute fixture at the gateway boundary. Cover authentication, authorization, streaming, persistence, interrupted replies, explicit retry, route management, quota accounting, limits, and free route failures.
-- In the dedicated Linux VM, smoke-test role-based login, persistence after Django restarts, admin route changes, denial of management calls using the inference credential, and provisioning reruns that preserve the selected route and state.
-- Record the Docker suite, VM smoke test, and live provider check separately. Verify a streamed reply through the seeded free route live. If the provider is unavailable, leave live verification pending and record the sanitized error.
-- Verify memory isolation and outbound request contents with the controlled gateway. Test skill discovery, authorization, preparation and execution through public interfaces. In the Linux VM, verify job isolation, network denial or approved mediation as applicable, resource limits, and cleanup after success, failure, and timeout. Test CSV ownership and explicit summarization intent through chat when that migration is implemented.
+- On the current Docker Desktop environment, smoke-test role-based login, persistence after Django restarts, admin route changes, denial of management calls using the inference credential, and provisioning reruns that preserve the selected route and state.
+- Record controlled Docker checks, deployment checks, and live provider checks separately. Historical Linux VM evidence is not evidence for a new Docker Desktop snapshot. Verify a streamed reply through the seeded free route live. If the provider is unavailable, leave live verification pending and record the sanitized error.
+- Verify memory isolation and outbound request contents with the controlled gateway. Test skill discovery, authorization, preparation and execution through public interfaces. Verify job isolation, network denial or approved mediation as applicable, resource limits, and cleanup after success, failure, and timeout using isolated test data. Keep the additional acceptance gate in [milestones](milestones.md#3-skills-and-bundled-execution) separate. Test CSV ownership and explicit summarization intent through chat when that migration is implemented.
 
 ## Out of Scope
 
@@ -56,4 +56,4 @@ Track implementation and runtime verification separately in the milestones and i
 
 - [Architecture and agreed decisions](architecture.md)
 - [Milestones and acceptance criteria](milestones.md)
-- [VM and Docker runbook](vm-runbook.md)
+- [Docker and deployment runbook](vm-runbook.md)

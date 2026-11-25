@@ -81,6 +81,22 @@ class SkillRun(models.Model):
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
 
+class SkillOutbox(models.Model):
+    job_id = models.UUIDField(primary_key=True, editable=False)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    payload = models.JSONField()
+    state = models.CharField(max_length=16, default="pending")
+    preparation = models.OneToOneField(SkillPreparation, null=True, on_delete=models.CASCADE, related_name="outbox")
+    execution = models.OneToOneField(SkillRun, null=True, on_delete=models.CASCADE, related_name="outbox")
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(preparation__isnull=False, execution__isnull=True) |
+                       models.Q(preparation__isnull=True, execution__isnull=False)),
+            name="skill_outbox_exactly_one_owner",
+        )]
+
+
 class CsvFile(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)

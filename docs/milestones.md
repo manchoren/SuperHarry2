@@ -1,6 +1,6 @@
 # Milestones and acceptance
 
-Docker suite, VM smoke test, and live provider results are recorded separately below.
+The current working environment is Docker Desktop on Windows. Record controlled Docker checks, checks against the deployed services, and live provider results separately. Earlier Linux VM results below are historical evidence for the snapshots identified there, not proof of current deployment acceptance.
 
 ## 1. Chat and administration
 
@@ -9,7 +9,7 @@ Docker suite, VM smoke test, and live provider results are recorded separately b
 - Django preserves partial replies on interruption, marks them incomplete, and allows an explicit retry without automatically resubmitting.
 - An administrator can list routes, add or update a model on an existing provider connection, test it, and change the default without editing code. A regular user sees the active model.
 - Daily limits, response caps, per-user overrides, and the one-active-response limit are enforced. Local rejections leave quota intact and repeat delivery of the same submission consumes one quota unit.
-- Docker tests run with a controlled gateway fixture. The VM smoke test covers login, persistence, and a route change. A separate live check verifies that the seeded OpenRouter Gemma free route returns a streamed reply. Record an unavailable free route as pending live verification.
+- Docker tests run with a controlled gateway fixture. Deployment smoke tests cover login, persistence, and a route change. A separate live check verifies that the seeded OpenRouter Gemma free route returns a streamed reply. Record an unavailable free route as pending live verification.
 
 ## 2. Saved memory
 
@@ -18,10 +18,10 @@ Docker suite, VM smoke test, and live provider results are recorded separately b
 
 ## 3. Skills and bundled execution
 
-- Repository and VM skills are discovered dynamically, and users can manage VM skill drafts according to ownership.
+- Repository and locally stored skills are discovered dynamically, and users can manage local skill drafts according to ownership. The current interface calls application-managed local skills “VM skills”; using them does not require starting a separate VM.
 - A skill can be prepared and executed in an isolated environment; prepared skills are available to users and results remain private to the submitting user.
 - The agent selects an appropriate skill through chat. A regular user can explicitly request a summary of their own CSV and read the result; attaching a file alone does not start processing.
-- Dedicated Linux VM checks verify job isolation, network denial or approved mediation as applicable, limits, and cleanup after success, failure, and timeout.
+- Isolated checks verify job isolation, network denial or approved mediation as applicable, limits, and cleanup after success, failure, and timeout. Issue #28 still explicitly requires dedicated Linux VM acceptance; Docker Desktop evidence does not satisfy that separate requirement unless it is explicitly revised.
 
 ## Validation evidence
 

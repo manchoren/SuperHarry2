@@ -2,6 +2,8 @@
 !requirements.txt
 !csv_worker.py
 !skill_worker.py
+!scripts/
+!scripts/**
 !superharry/
 !superharry/**
 !tests/

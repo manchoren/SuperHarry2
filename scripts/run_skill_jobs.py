@@ -1,7 +1,6 @@
 """Process the dedicated skill spool from a host with Docker access."""
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time
@@ -10,6 +9,7 @@ from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.skill_sandbox import remove_container, run_skill
+from scripts.runtime_policy import check_component_versions
 from scripts.worker_lock import lock_spool
 from superharry.csv_protocol import publish, read_limited
 
@@ -57,14 +57,7 @@ def validate_runtime():
             text=True, timeout=15,
         ))
         versions = {entry["Name"]: entry["Version"] for entry in components}
-        rejected = []
-        for component, minimum in (("runc", (1, 4, 3)), ("containerd", (2, 3, 6))):
-            reported = versions.get(component, "")
-            match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?", reported)
-            if not match or tuple(map(int, match.groups())) < minimum:
-                rejected.append(f"{component} {reported or 'unknown'} (project minimum {'.'.join(map(str, minimum))})")
-        if rejected:
-            raise ValueError("; ".join(rejected))
+        check_component_versions(versions)
     except (OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError) as error:
         raise RuntimeError(f"Skill worker runtime check failed: {error}") from error
 

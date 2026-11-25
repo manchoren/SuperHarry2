@@ -12,9 +12,9 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST, require_safe
 
 from .text_skills import SKILLS_DIRECTORY
-from .models import SkillPreparation, SkillRun, VmSkill
+from .models import SkillOutbox, SkillPreparation, SkillRun, VmSkill
 from .skill_files import validate_skill_files
-from .skill_jobs import enqueue, result, skill_fingerprint, spool
+from .skill_jobs import dispatch_one, encode_job, result, skill_fingerprint, spool
 
 
 class SkillForm(forms.ModelForm):
@@ -65,6 +65,11 @@ def preparation_status(skill):
     if outcome is None:
         if any((directory / f"{preparation.job_id}.{suffix}").exists() for suffix in ("skill-input", "skill-running")):
             return "Preparation pending"
+        delivery = SkillOutbox.objects.filter(job_id=preparation.job_id).values_list("state", flat=True).first()
+        if delivery == "pending":
+            return "Delivery pending"
+        if delivery == "publishing":
+            return "Delivery outcome uncertain or publication in progress; operator investigation required"
         outcome = result(directory, preparation.job_id)
         if outcome is None:
             return "Preparation failed"
@@ -138,6 +143,8 @@ def has_active_jobs(skill):
         identifiers.append(preparation.job_id)
     if not identifiers:
         return False
+    if SkillOutbox.objects.filter(job_id__in=identifiers).exists():
+        return True
     directory = spool()
     if directory is None:
         return True
@@ -157,6 +164,7 @@ def detail(request, name):
     return render(request, "skills/detail.html", {
         "skill": skill, "can_manage": can_manage, "preparation_status": preparation_status(skill),
         "preparation_configured": spool() is not None,
+        "preparation_job_id": skill.preparation.job_id if getattr(skill, "preparation", None) else None,
     })
 
 
@@ -171,7 +179,7 @@ def prepare(request, name):
     if directory is None:
         return HttpResponse("Skill preparation is not configured.", status=503)
     previous = SkillPreparation.objects.defer("payload").filter(skill=skill).first()
-    if previous and any((directory / f"{previous.job_id}.{suffix}").exists() for suffix in ("skill-input", "skill-running")):
+    if previous and (SkillOutbox.objects.filter(job_id=previous.job_id).exists() or any((directory / f"{previous.job_id}.{suffix}").exists() for suffix in ("skill-input", "skill-running"))):
         return HttpResponse("Wait for the current preparation or worker recovery.", status=409)
     entrypoint = request.POST.get("entrypoint", "")
     if entrypoint not in skill.files:
@@ -194,11 +202,13 @@ def prepare(request, name):
     }
     identifier = uuid4()
     try:
+        encode_job(payload)
         with transaction.atomic():
-            SkillPreparation.objects.update_or_create(skill=skill, defaults={
+            preparation, _ = SkillPreparation.objects.update_or_create(skill=skill, defaults={
                 "job_id": identifier, "fingerprint": skill_fingerprint(skill), "payload": payload,
             })
-            transaction.on_commit(lambda: enqueue(directory, identifier, payload))
+            SkillOutbox.objects.create(job_id=identifier, payload=payload, preparation=preparation, requested_by=request.user)
+            transaction.on_commit(lambda: dispatch_one(identifier))
     except ValueError:
         return HttpResponse("Skill job exceeds the size limit.", status=400)
     except OSError:
@@ -228,9 +238,11 @@ def run(request, name):
     payload = {**preparation.payload, "operation": "run", "input": input_text}
     identifier = uuid4()
     try:
+        encode_job(payload)
         with transaction.atomic():
-            SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier)
-            transaction.on_commit(lambda: enqueue(directory, identifier, payload))
+            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier)
+            SkillOutbox.objects.create(job_id=identifier, payload=payload, execution=execution, requested_by=request.user)
+            transaction.on_commit(lambda: dispatch_one(identifier))
     except ValueError:
         return HttpResponse("Skill job exceeds the size limit.", status=400)
     except OSError:
@@ -244,7 +256,13 @@ def run(request, name):
 def run_detail(request, job_id):
     job = get_object_or_404(SkillRun, job_id=job_id, owner=request.user)
     outcome = result(spool(), job.job_id)
-    return render(request, "skills/run_detail.html", {"job": job, "outcome": outcome})
+    delivery = SkillOutbox.objects.filter(job_id=job.job_id).values_list("state", flat=True).first()
+    directory = spool()
+    if delivery == "publishing" and directory is not None and any(
+        (directory / f"{job.job_id}.{suffix}").exists() for suffix in ("skill-input", "skill-running")
+    ):
+        delivery = "pending"
+    return render(request, "skills/run_detail.html", {"job": job, "outcome": outcome, "delivery": delivery})
 
 
 @never_cache

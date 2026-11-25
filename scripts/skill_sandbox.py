@@ -44,6 +44,16 @@ def run_skill(request, timeout=30, job_id=None):
         "--tmpfs=/work:rw,nosuid,nodev,size=16m,mode=1777",
         "--tmpfs=/env:rw,nosuid,nodev,size=64m,mode=1777", "superharry-skill-worker:local",
     ]
+    try:
+        outcome = _execute(command, payload, timeout)
+    finally:
+        cleanup_verified = remove_container(job_id)
+    if not cleanup_verified:
+        return {"status": "failed", "reason": "cleanup_unverified"}
+    return outcome
+
+
+def _execute(command, payload, timeout):
     process = None
     output = bytearray()
     overflow = threading.Event()
@@ -95,7 +105,8 @@ def run_skill(request, timeout=30, job_id=None):
     except (OSError, ValueError, subprocess.SubprocessError):
         return {"status": "failed"}
     finally:
-        if process and process.poll() is None:
-            process.kill()
-        if not remove_container(job_id):
-            return {"status": "failed", "reason": "cleanup_unverified"}
+        try:
+            if process and process.poll() is None:
+                process.kill()
+        except (OSError, subprocess.SubprocessError):
+            pass
