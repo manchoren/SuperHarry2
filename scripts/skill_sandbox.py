@@ -3,6 +3,7 @@ import json
 import base64
 import subprocess
 import threading
+import time
 from uuid import UUID, uuid4
 
 
@@ -111,14 +112,28 @@ def _execute(command, payload, timeout, network_handler=None, package_handler=No
         writer = threading.Thread(target=write_input, daemon=True)
         reader.start()
         writer.start()
-        try:
-            code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            if cancelled is not None:
-                cancelled.set()
-            process.kill()
-            process.wait(timeout=5)
-            return {"status": "timeout"}
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancelled is not None and cancelled.is_set():
+                process.kill()
+                process.wait(timeout=5)
+                reader.join(timeout=15)
+                writer.join(timeout=5)
+                if reader.is_alive() or writer.is_alive():
+                    return {"status": "failed", "reason": "cleanup_unverified"}
+                return {"status": "failed", "reason": "interrupted"}
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if cancelled is not None:
+                    cancelled.set()
+                process.kill()
+                process.wait(timeout=5)
+                return {"status": "timeout"}
+            try:
+                code = process.wait(timeout=min(remaining, 0.1))
+                break
+            except subprocess.TimeoutExpired:
+                continue
         if cancelled is not None:
             cancelled.set()
         reader.join(timeout=5)

@@ -35,7 +35,6 @@ class SkillSandboxCleanupTests(SimpleTestCase):
 
     def test_timeout_is_preserved_when_cleanup_succeeds(self):
         process = self.process()
-        process.wait.side_effect = [subprocess.TimeoutExpired("docker", 1), 0]
         with patch("scripts.skill_sandbox.subprocess.Popen", return_value=process):
             with patch("scripts.skill_sandbox.remove_container", return_value=True):
-                self.assertEqual(run_skill({}, timeout=1), {"status": "timeout"})
+                self.assertEqual(run_skill({}, timeout=0), {"status": "timeout"})

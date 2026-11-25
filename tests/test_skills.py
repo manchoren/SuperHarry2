@@ -13,6 +13,183 @@ from django.test import TestCase, TransactionTestCase, override_settings
 class SkillCatalogTests(TransactionTestCase):
     serialized_rollback = True
 
+    def test_deleting_skill_stops_pending_run_and_notifies_its_owner(self):
+        from scripts.run_skill_jobs import process_queue
+
+        owner = get_user_model().objects.create_user(username="owner")
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(input())"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(Path(directory))
+            run = self.post_job("/skills/report/run/", {"input": "private"})
+            self.assertEqual(self.client.post("/skills/report/delete/").status_code, 302)
+            self.assertContains(self.client.get(run["Location"]), "Skill deleted")
+            with patch("scripts.run_skill_jobs.run_skill") as worker:
+                process_queue(Path(directory))
+                worker.assert_not_called()
+
+    def test_recovery_publishes_deletion_after_commit_callback_is_lost(self):
+        from django.core.management import call_command
+        from scripts.run_skill_jobs import process_queue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(input())"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(Path(directory))
+            run = self.post_job("/skills/report/run/", {"input": "private"})
+            with patch("superharry.skill_views.dispatch_lifecycle", return_value=False):
+                self.assertEqual(self.client.post("/skills/report/delete/").status_code, 302)
+            call_command("recover_skill_dispatch", verbosity=0)
+            with patch("scripts.run_skill_jobs.run_skill") as worker:
+                process_queue(Path(directory))
+                worker.assert_not_called()
+            self.assertContains(self.client.get(run["Location"]), "Skill deleted")
+
+    def test_affected_user_can_find_deleted_skill_notice_in_catalog(self):
+        from scripts.run_skill_jobs import process_queue
+
+        owner = get_user_model().objects.create_user(username="owner")
+        runner = get_user_model().objects.create_user(username="runner")
+        other = get_user_model().objects.create_user(username="other")
+        self.client.force_login(owner)
+        self.client.post("/skills/new/", {"name": "report", "purpose": "Report", "instructions": "Draft",
+                                         "files": '{"main.py":"print(input())"}', "dependencies": "[]"})
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(Path(directory))
+            self.client.force_login(runner)
+            run = self.post_job("/skills/report/run/", {"input": "private"})
+            self.client.force_login(owner)
+            self.client.post("/skills/report/delete/")
+            self.client.force_login(runner)
+            self.assertContains(self.client.get("/skills/"), run["Location"])
+            self.client.force_login(other)
+            self.assertNotContains(self.client.get("/skills/"), run["Location"])
+
+    def test_edit_during_database_writer_returns_retryable_failure(self):
+        from django.db import close_old_connections
+        from superharry.models import VmSkill
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {"name": "report", "purpose": "Report", "instructions": "Draft",
+                                         "files": '{"main.py":"print(1)"}', "dependencies": "[]"})
+        entered, release = threading.Event(), threading.Event()
+
+        def hold_write_lock():
+            try:
+                with transaction.atomic():
+                    VmSkill.objects.filter(name="report").update(purpose="Report")
+                    entered.set()
+                    release.wait(10)
+            finally:
+                close_old_connections()
+
+        writer = threading.Thread(target=hold_write_lock)
+        writer.start()
+        try:
+            self.assertTrue(entered.wait(10))
+            response = self.client.post("/skills/report/edit/", {
+                "name": "report", "purpose": "Changed", "instructions": "Draft",
+                "files": '{"main.py":"print(2)"}', "dependencies": "[]",
+            })
+            self.assertEqual(response.status_code, 503)
+        finally:
+            release.set()
+            writer.join(10)
+        self.assertEqual(VmSkill.objects.get(name="report").purpose, "Report")
+
+    def test_delete_supersedes_an_update_before_worker_processes_it(self):
+        from scripts.run_skill_jobs import process_queue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {"name": "report", "purpose": "Report", "instructions": "Draft",
+                                         "files": '{"main.py":"print(input())"}', "dependencies": "[]"})
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            folder = Path(directory)
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(folder)
+            run = self.post_job("/skills/report/run/", {"input": "private"})
+            self.assertEqual(self.client.post("/skills/report/edit/", {
+                "name": "report", "purpose": "Changed", "instructions": "Draft",
+                "files": '{"main.py":"print(2)"}', "dependencies": "[]",
+            }).status_code, 302)
+            self.assertEqual(self.client.post("/skills/report/delete/").status_code, 302)
+            with patch("scripts.run_skill_jobs.run_skill") as worker:
+                process_queue(folder)
+                worker.assert_not_called()
+            self.assertContains(self.client.get(run["Location"]), "Skill deleted")
+
+    def test_invalid_lifecycle_control_never_runs_the_old_job(self):
+        from scripts.run_skill_jobs import process_queue
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {"name": "report", "purpose": "Report", "instructions": "Draft",
+                                         "files": '{"main.py":"print(input())"}', "dependencies": "[]"})
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            folder = Path(directory)
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(folder)
+            self.post_job("/skills/report/run/", {"input": "private"})
+            self.client.post("/skills/report/edit/", {"name": "report", "purpose": "Changed", "instructions": "Draft",
+                                                    "files": '{"main.py":"print(2)"}', "dependencies": "[]"})
+            next(folder.glob("*.skill-control")).write_text("invalid", encoding="utf-8")
+            with patch("scripts.run_skill_jobs.run_skill") as worker:
+                with self.assertRaises(RuntimeError):
+                    process_queue(folder)
+                worker.assert_not_called()
+
+    def test_worker_recovers_deletion_interrupted_while_claiming_control(self):
+        from scripts.run_skill_jobs import process_queue, recover_interrupted
+
+        self.client.force_login(get_user_model().objects.create_user(username="owner"))
+        self.client.post("/skills/new/", {
+            "name": "report", "purpose": "Report", "instructions": "Draft",
+            "files": '{"main.py": "print(input())"}', "dependencies": "[]",
+        })
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            folder = Path(directory)
+            self.post_job("/skills/report/prepare/", {"entrypoint": "main.py"})
+            with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": ""}):
+                process_queue(folder)
+            run = self.post_job("/skills/report/run/", {"input": "private"})
+            self.client.post("/skills/report/delete/")
+            control = next(folder.glob("*.skill-control"))
+            control.rename(control.with_suffix(".skill-applying"))
+            recover_interrupted(folder)
+            with patch("scripts.run_skill_jobs.run_skill") as worker:
+                process_queue(folder)
+                worker.assert_not_called()
+            self.assertFalse(list(folder.glob("*.skill-input")))
+            self.assertContains(self.client.get(run["Location"]), "Skill deleted")
+
+    def test_recovery_preserves_a_result_published_before_worker_interruption(self):
+        from scripts.run_skill_jobs import recover_interrupted
+        from superharry.models import SkillRun
+
+        owner = get_user_model().objects.create_user(username="owner")
+        self.client.force_login(owner)
+        run = SkillRun.objects.create(owner=owner, skill_name="report")
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            folder = Path(directory)
+            (folder / f"{run.job_id}.skill-running").write_text('{"input":"original"}')
+            (folder / f"{run.job_id}.skill-result").write_text('{"status":"complete","output":"delivered"}')
+            with patch("scripts.run_skill_jobs.remove_container", return_value=True):
+                recover_interrupted(folder)
+            self.assertContains(self.client.get(f"/skill-runs/{run.job_id}/"), "delivered")
+
     def post_job(self, url, data):
         return self.client.post(url, data)
 
@@ -275,7 +452,7 @@ class SkillCatalogTests(TransactionTestCase):
             self.assertEqual(response.status_code, 302)
             location = response["Location"]
             self.client.force_login(owner)
-            self.assertEqual(self.client.post("/skills/report/delete/").status_code, 409)
+            self.assertEqual(self.client.get(location).status_code, 404)
             self.client.force_login(other)
             with patch("scripts.run_skill_jobs.run_skill", return_value={"status": "complete", "output": "hello\n"}):
                 process_queue(Path(directory))

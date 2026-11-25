@@ -4,13 +4,15 @@ import json
 import os
 import re
 import tomllib
+from functools import wraps
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from django import forms
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import OperationalError, transaction
+from django.db.models import F
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
@@ -19,8 +21,20 @@ from django.views.decorators.http import require_POST, require_safe
 from .text_skills import SKILLS_DIRECTORY
 from .models import SkillOutbox, SkillPreparation, SkillRun, VmSkill
 from .skill_files import validate_skill_files
-from .skill_jobs import dispatch_one, encode_job, pending_network_requests, result, skill_fingerprint, spool
+from .skill_jobs import dispatch_lifecycle, dispatch_one, encode_job, pending_network_requests, result, run_result, skill_fingerprint, spool
 from .csv_protocol import read_limited
+
+
+def retry_when_database_busy(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        try:
+            return view(*args, **kwargs)
+        except OperationalError as error:
+            if "locked" not in str(error).lower() and "busy" not in str(error).lower():
+                raise
+            return HttpResponse("The skill is busy; please retry.", status=503)
+    return wrapped
 
 
 class SkillForm(forms.ModelForm):
@@ -122,7 +136,8 @@ def catalog(request):
     vm_names = set(VmSkill.objects.values_list("name", flat=True))
     for skill in skills:
         skill["conflict"] = skill["name"] in repository_names and skill["name"] in vm_names
-    return render(request, "skills/catalog.html", {"skills": skills})
+    notices = SkillRun.objects.filter(owner=request.user).exclude(lifecycle="").order_by("-pk")
+    return render(request, "skills/catalog.html", {"skills": skills, "run_notices": notices})
 
 
 @never_cache
@@ -160,6 +175,23 @@ def has_active_jobs(skill):
         (directory / f"{identifier}.{suffix}").exists()
         for identifier in identifiers for suffix in ("skill-input", "skill-running")
     )
+
+
+def original_run_payload(directory, run):
+    if run.execution_payload:
+        return run.execution_payload.copy()
+    outbox = SkillOutbox.objects.filter(job_id=run.job_id).first()
+    if outbox:
+        return outbox.payload.copy()
+    if directory is not None:
+        for suffix in ("skill-input", "skill-running", "skill-input", "skill-running"):
+            try:
+                payload = json.loads(read_limited(directory / f"{run.job_id}.{suffix}", 8 * 1024 * 1024))
+                if isinstance(payload, dict) and isinstance(payload.get("input"), str):
+                    return payload
+            except (OSError, ValueError):
+                pass
+    return {}
 
 
 @never_cache
@@ -227,8 +259,13 @@ def prepare(request, name):
 @never_cache
 @login_required
 @require_POST
+@retry_when_database_busy
+@transaction.atomic
 def run(request, name):
     skill = get_object_or_404(VmSkill, name=name)
+    if not VmSkill.objects.filter(pk=skill.pk).update(owner_id=F("owner_id")):
+        raise Http404
+    skill.refresh_from_db()
     directory = spool()
     if directory is None:
         return HttpResponse("Skill execution is not configured.", status=503)
@@ -258,7 +295,7 @@ def run(request, name):
     try:
         encode_job(payload)
         with transaction.atomic():
-            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier)
+            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier, execution_payload=payload)
             SkillOutbox.objects.create(job_id=identifier, payload=payload, execution=execution, requested_by=request.user)
             transaction.on_commit(lambda: dispatch_one(identifier))
     except ValueError:
@@ -273,7 +310,7 @@ def run(request, name):
 @require_safe
 def run_detail(request, job_id):
     job = get_object_or_404(SkillRun, job_id=job_id, owner=request.user)
-    outcome = result(spool(), job.job_id)
+    outcome = run_result(spool(), job)
     delivery = SkillOutbox.objects.filter(job_id=job.job_id).values_list("state", flat=True).first()
     directory = spool()
     if delivery == "publishing" and directory is not None and any(
@@ -282,7 +319,7 @@ def run_detail(request, job_id):
         delivery = "pending"
     return render(request, "skills/run_detail.html", {
         "job": job, "outcome": outcome, "delivery": delivery,
-        "network_requests": pending_network_requests(directory, job.job_id) if outcome is None else [],
+        "network_requests": pending_network_requests(directory, job.job_id) if outcome is None and running_is_current(directory, job) else [],
     })
 
 
@@ -295,8 +332,8 @@ def network_decision(request, job_id, request_id):
     choice = request.POST.get("decision")
     if choice not in ("approve", "deny"):
         return HttpResponse("Invalid decision.", status=400)
-    if (directory is None or not (directory / f"{job_id}.skill-running").is_file()
-            or (directory / f"{job_id}.skill-result").exists()):
+    if (directory is None or not running_is_current(directory, job)
+            or run_result(directory, job) is not None):
         return HttpResponse("This request is no longer pending.", status=409)
     path = directory / f"{job_id}.{request_id}.network-request"
     try:
@@ -321,6 +358,18 @@ def network_decision(request, job_id, request_id):
     return redirect("skill-run-detail", job_id=job.job_id)
 
 
+def running_is_current(directory, job):
+    if directory is None or job.lifecycle == "deleted":
+        return False
+    if job.lifecycle_generation == 0:
+        return (directory / f"{job.job_id}.skill-running").is_file()
+    try:
+        request = json.loads(read_limited(directory / f"{job.job_id}.skill-running", 8 * 1024 * 1024))
+        return request.get("_lifecycle_generation", 0) == job.lifecycle_generation
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 @never_cache
 @login_required
 @require_safe
@@ -334,13 +383,55 @@ def repository_detail(request, name):
 
 @never_cache
 @login_required
+@retry_when_database_busy
 def edit(request, name):
     skill = get_object_or_404(manageable_skills(request.user), name=name)
-    if request.method == "POST" and has_active_jobs(skill):
-        return HttpResponse("Wait for active skill jobs to finish.", status=409)
     form = SkillForm(request.POST or None, instance=skill)
     if request.method == "POST" and form.is_valid():
-        form.save()
+        with transaction.atomic():
+            if not VmSkill.objects.filter(pk=skill.pk).update(owner_id=F("owner_id")):
+                raise Http404
+            skill.refresh_from_db()
+            form = SkillForm(request.POST, instance=skill)
+            if not form.is_valid():
+                return render(request, "skills/form.html", {"form": form})
+            directory = spool()
+            preparation = SkillPreparation.objects.filter(skill=skill).first()
+            if preparation and (SkillOutbox.objects.filter(job_id=preparation.job_id).exists() or
+                    directory is None or any((directory / f"{preparation.job_id}.{suffix}").exists()
+                                             for suffix in ("skill-input", "skill-running"))):
+                return HttpResponse("Wait for active skill jobs to finish.", status=409)
+            active = [run for run in SkillRun.objects.filter(skill=skill)
+                      if run_result(directory, run) is None]
+            updates = []
+            for run in active:
+                uncertain = run.lifecycle_uncertain or (not run.execution_payload and directory is not None and (
+                    (directory / f"{run.job_id}.skill-running").exists() or
+                    (not (directory / f"{run.job_id}.skill-input").exists() and
+                     not SkillOutbox.objects.filter(job_id=run.job_id).exists())
+                ))
+                payload = original_run_payload(directory, run)
+                if payload.get("entrypoint") not in form.cleaned_data["files"]:
+                    payload = {}
+                else:
+                    if payload.get("dependencies") != form.cleaned_data["dependencies"]:
+                        payload["wheels"] = {}
+                    payload["files"] = form.cleaned_data["files"]
+                    payload["dependencies"] = form.cleaned_data["dependencies"]
+                try:
+                    encode_job({"action": "updated", "generation": run.lifecycle_generation + 1, "payload": payload, "uncertain": uncertain})
+                except ValueError:
+                    return HttpResponse("Updated skill job exceeds the size limit.", status=400)
+                updates.append((run, payload, uncertain))
+            for run, payload, uncertain in updates:
+                run.execution_payload = payload
+                run.lifecycle_uncertain = uncertain
+                run.lifecycle = "updated"
+                run.lifecycle_generation += 1
+                run.save(update_fields=("execution_payload", "lifecycle", "lifecycle_generation", "lifecycle_uncertain"))
+                SkillOutbox.objects.filter(job_id=run.job_id).delete()
+                transaction.on_commit(lambda identifier=run.job_id: dispatch_lifecycle(identifier))
+            form.save()
         return redirect("skills")
     return render(request, "skills/form.html", {"form": form})
 
@@ -348,9 +439,28 @@ def edit(request, name):
 @never_cache
 @login_required
 @require_POST
+@retry_when_database_busy
 def delete(request, name):
-    skill = get_object_or_404(manageable_skills(request.user), name=name)
-    if has_active_jobs(skill):
-        return HttpResponse("Wait for active skill jobs to finish.", status=409)
-    skill.delete()
+    with transaction.atomic():
+        skill = get_object_or_404(manageable_skills(request.user), name=name)
+        # SQLite needs a write to serialize this transition with a publisher.
+        VmSkill.objects.filter(pk=skill.pk).update(owner_id=F("owner_id"))
+        directory = spool()
+        preparation = SkillPreparation.objects.filter(skill=skill).first()
+        if preparation and (SkillOutbox.objects.filter(job_id=preparation.job_id).exists() or
+                directory is None or any((directory / f"{preparation.job_id}.{suffix}").exists()
+                                         for suffix in ("skill-input", "skill-running"))):
+            return HttpResponse("Wait for active skill jobs to finish.", status=409)
+        runs = list(SkillRun.objects.filter(skill=skill))
+        if directory is None and runs:
+            return HttpResponse("Skill execution is not configured.", status=503)
+        for run in runs:
+            if run_result(directory, run) is None:
+                SkillOutbox.objects.filter(job_id=run.job_id).delete()
+                run.lifecycle = "deleted"
+                run.execution_payload = {}
+                run.lifecycle_generation += 1
+                run.save(update_fields=("lifecycle", "lifecycle_generation", "execution_payload"))
+                transaction.on_commit(lambda identifier=run.job_id: dispatch_lifecycle(identifier))
+        skill.delete()
     return redirect("skills")

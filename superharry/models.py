@@ -79,6 +79,10 @@ class SkillRun(models.Model):
     skill = models.ForeignKey(VmSkill, null=True, on_delete=models.SET_NULL)
     skill_name = models.CharField(max_length=48)
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    lifecycle = models.CharField(max_length=16, blank=True, default="")
+    lifecycle_generation = models.PositiveIntegerField(default=0)
+    lifecycle_uncertain = models.BooleanField(default=False)
+    execution_payload = models.JSONField(default=dict)
 
 
 class SkillOutbox(models.Model):

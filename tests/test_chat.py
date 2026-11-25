@@ -18,6 +18,24 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_chat_updates_skill_with_pending_run(self):
+        from superharry.models import SkillPreparation, VmSkill
+        from superharry.skill_jobs import skill_fingerprint
+
+        skill = VmSkill.objects.create(owner=self.user, name="owned", purpose="Original", instructions="Original", files={"main.py": "print(input())"})
+        payload = {"operation": "prepare", "files": skill.files, "entrypoint": "main.py", "input": "", "dependencies": [], "wheels": {}}
+        preparation = SkillPreparation.objects.create(skill=skill, fingerprint=skill_fingerprint(skill), payload=payload)
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            (Path(directory) / f"{preparation.job_id}.skill-result").write_text('{"status":"complete","output":""}')
+            self.assertEqual(self.client.post("/skills/owned/run/", {"input": "original"}).status_code, 302)
+            args = json.dumps({"name": "owned", "purpose": "Revised", "instructions": "Revised", "files": {"main.py": "print('new', input())"}, "dependencies": []})
+            event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "edit-1", "function": {"name": "update_skill", "arguments": args}}]}}]}
+            self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+            response = self.client.post("/chat/send/", {"message": "Update my skill"})
+            output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+            self.assertIn("Skill updated", output)
+            self.assertEqual(VmSkill.objects.get(name="owned").instructions, "Revised")
+
     def test_chat_updates_its_own_skill(self):
         from superharry.models import VmSkill
         VmSkill.objects.create(owner=self.user, name="owned", purpose="Original", instructions="Original")

@@ -2,10 +2,16 @@
 {% block title %}Skill result{% endblock %}
 {% block content %}
   <h1>Skill result: {{ job.skill_name }}</h1>
-  {% if not outcome and delivery == 'publishing' %}<p role="status">Delivery outcome uncertain or publication in progress; operator investigation required. Job: <code>{{ job.job_id }}</code></p>
+  {% if job.lifecycle == 'deleted' and not outcome %}<p role="status">Skill deleted; execution is stopping.</p>
+  {% elif job.lifecycle == 'updated' and not outcome %}<p role="status">Skill updated; execution is stopping or restarting.</p>
+  {% elif not outcome and delivery == 'publishing' %}<p role="status">Delivery outcome uncertain or publication in progress; operator investigation required. Job: <code>{{ job.job_id }}</code></p>
   {% elif not outcome %}<p role="status">Execution pending</p>
   {% elif outcome.status == 'complete' %}<pre>{{ outcome.output }}</pre>
   {% elif outcome.status == 'timeout' %}<p>Execution timed out.</p>
+  {% elif outcome.reason == 'skill_deleted' %}<p>Skill deleted; execution stopped.</p>
+  {% elif outcome.reason == 'skill_changed_external' %}<p>Skill updated; execution stopped. External action was not repeated.</p>
+  {% elif outcome.reason == 'skill_changed_uncertain' %}<p>Skill updated; execution stopped because prior external activity is unknown. The run was not automatically repeated.</p>
+  {% elif outcome.reason == 'skill_changed_unavailable' %}<p>Skill updated; execution stopped because the original entrypoint is unavailable.</p>
   {% else %}<p>Execution failed.</p>{% endif %}
   {% for action in network_requests %}
     <section>

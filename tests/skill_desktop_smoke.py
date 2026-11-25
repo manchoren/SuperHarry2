@@ -76,11 +76,32 @@ except PermissionError:
         elif action == "verify_network":
             location = (spool / "network-result-path.txt").read_text(encoding="utf-8")
             assert b"handled" in client.get(location).content
+        elif action == "prepare_lifecycle":
+            response = client.post("/skills/new/", {
+                "name": "desktop-lifecycle", "purpose": "Demo", "instructions": "Demo",
+                "files": json.dumps({"main.py": "import time; time.sleep(60); print(input())"}),
+                "dependencies": "[]",
+            })
+            assert response.status_code == 302
+            assert client.post("/skills/desktop-lifecycle/prepare/", {"entrypoint": "main.py"}).status_code == 302
+        elif action == "run_lifecycle":
+            response = client.post("/skills/desktop-lifecycle/run/", {"input": "synthetic input"})
+            assert response.status_code == 302
+            (spool / "lifecycle-result-path.txt").write_text(response["Location"], encoding="utf-8")
+        elif action == "update_lifecycle":
+            response = client.post("/skills/desktop-lifecycle/edit/", {
+                "name": "desktop-lifecycle", "purpose": "Demo", "instructions": "Demo",
+                "files": json.dumps({"main.py": "print('updated:', input())"}), "dependencies": "[]",
+            })
+            assert response.status_code == 302, response.status_code
+        elif action == "verify_lifecycle":
+            location = (spool / "lifecycle-result-path.txt").read_text(encoding="utf-8")
+            assert b"updated: synthetic input" in client.get(location).content
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=("prepare", "run", "verify", "prepare_network", "run_network", "approve_network", "verify_network"))
+    parser.add_argument("--phase", choices=("prepare", "run", "verify", "prepare_network", "run_network", "approve_network", "verify_network", "prepare_lifecycle", "run_lifecycle", "update_lifecycle", "verify_lifecycle"))
     args = parser.parse_args()
     if args.phase:
         phase(args.phase)
@@ -138,6 +159,19 @@ def main():
             worker.join(30)
             assert not worker.is_alive() and not errors, errors
             docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "verify_network")
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "prepare_lifecycle")
+            process_once()
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "run_lifecycle")
+            worker = threading.Thread(target=process_network)
+            worker.start()
+            deadline = time.monotonic() + 20
+            while not list(spool.glob("*.skill-running")) and time.monotonic() < deadline and worker.is_alive():
+                time.sleep(0.1)
+            assert list(spool.glob("*.skill-running")), errors
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "update_lifecycle")
+            worker.join(30)
+            assert not worker.is_alive() and not errors, errors
+            docker_exec("python", "-m", "tests.skill_desktop_smoke", "--phase", "verify_lifecycle")
             assert not list(spool.glob("*.skill-input")) and not list(spool.glob("*.skill-running"))
             print("Docker Desktop skill spool smoke passed.", flush=True)
         finally:

@@ -314,20 +314,23 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
                         elif call.get("name") in ("create_skill", "update_skill", "prepare_skill") and max_response_characters - len(reply.content) < 220:
                             text = "The response limit is too small to report this skill action."
                         elif call.get("name") == "update_skill":
-                            from .skill_views import SkillForm, has_active_jobs, manageable_skills
+                            from django.http import HttpRequest, QueryDict
+                            from .skill_views import edit
                             try:
                                 args = json.loads(call["arguments"])
                                 if not isinstance(args, dict) or set(args) != {"name", "purpose", "instructions", "files", "dependencies"}:
                                     raise ValueError
-                                candidate = manageable_skills(submission.owner).filter(name=args["name"]).first()
-                                if candidate is None or has_active_jobs(candidate):
+                                update_request = HttpRequest()
+                                update_request.method, update_request.user = "POST", submission.owner
+                                update_request.POST = QueryDict("", mutable=True)
+                                for key in ("name", "purpose", "instructions"):
+                                    update_request.POST[key] = args[key]
+                                update_request.POST["files"] = json.dumps(args["files"])
+                                update_request.POST["dependencies"] = json.dumps(args["dependencies"])
+                                if edit(update_request, args["name"]).status_code != 302:
                                     raise ValueError
-                                form = SkillForm({**args, "files": json.dumps(args["files"]), "dependencies": json.dumps(args["dependencies"])}, instance=candidate)
-                                if not form.is_valid():
-                                    raise ValueError
-                                form.save()
                                 tool_result = "Skill updated; prepare it again before execution."
-                            except (ValueError, TypeError, KeyError):
+                            except (ValueError, TypeError, KeyError, Http404):
                                 tool_result = "You cannot update this skill, or its fields are invalid or it has active jobs."
                                 if scheduled:
                                     failed, error = True, tool_result

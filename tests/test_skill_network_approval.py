@@ -201,6 +201,7 @@ class SkillNetworkApprovalTests(TestCase):
         job = SkillRun.objects.create(owner=user, skill_name="example")
         request_id = uuid4()
         with TemporaryDirectory() as directory, override_settings(SKILL_SPOOL=directory):
+            (Path(directory) / f"{job.job_id}.skill-running").write_text("{}", encoding="utf-8")
             path = Path(directory) / f"{job.job_id}.{request_id}.network-request"
             path.write_text(json.dumps({
                 "method": "POST", "url": "https://example.org/submit", "body": "private report",

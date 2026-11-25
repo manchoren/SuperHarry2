@@ -76,7 +76,7 @@ def scheduler_lock():
 
 
 def recover_occurrences():
-    from .skill_jobs import result, spool
+    from .skill_jobs import result, run_result, spool
     def append_result(occurrence, text):
         if occurrence.reply:
             maximum = ChatLimits.objects.get(pk=1).max_response_characters
@@ -99,11 +99,17 @@ def recover_occurrences():
             occurrence.failure_reason = "" if success else text
             occurrence.save(update_fields=("status", "failure_reason"))
     for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_skill").select_related("skill_run", "reply"):
-        outcome = result(spool(), occurrence.skill_run.job_id) if occurrence.skill_run else {"status": "failed"}
+        outcome = run_result(spool(), occurrence.skill_run) if occurrence.skill_run else {"status": "failed"}
         if outcome is None:
             continue
         success = outcome.get("status") == "complete"
         text = outcome.get("output", "") if success else "Skill execution failed or timed out."
+        if outcome.get("reason") == "skill_deleted":
+            text = "Skill deleted; execution stopped."
+        elif outcome.get("reason") == "skill_changed_external":
+            text = "Skill updated; execution stopped. External action was not repeated."
+        elif outcome.get("reason") == "skill_changed_uncertain":
+            text = "Skill updated; execution stopped because prior external activity is unknown. The run was not automatically repeated."
         if not isinstance(text, str):
             text = "Skill execution returned an invalid result."
             success = False

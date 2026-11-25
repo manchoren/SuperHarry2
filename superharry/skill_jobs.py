@@ -106,7 +106,43 @@ def dispatch_one(job_id):
 
 def dispatch_pending():
     ids = list(SkillOutbox.objects.order_by("state", "job_id").values_list("job_id", flat=True))
-    return sum(dispatch_one(job_id) for job_id in ids)
+    delivered = sum(dispatch_one(job_id) for job_id in ids)
+    for job_id in SkillRun.objects.exclude(lifecycle="").values_list("job_id", flat=True):
+        dispatch_lifecycle(job_id)
+    return delivered
+
+
+def dispatch_lifecycle(job_id):
+    directory = spool()
+    if directory is None or connection.in_atomic_block:
+        return False
+    try:
+        with transaction.atomic():
+            if not SkillRun.objects.filter(job_id=job_id).exclude(lifecycle="").update(lifecycle=F("lifecycle")):
+                return False
+            run = SkillRun.objects.get(job_id=job_id)
+            outcome = result(directory, job_id)
+            if outcome and outcome.get("generation", 0) >= run.lifecycle_generation:
+                return True
+            for suffix in ("skill-control", "skill-applying", "skill-input", "skill-running"):
+                try:
+                    queued = json.loads(read_limited(directory / f"{job_id}.{suffix}", MAX_JOB_BYTES))
+                    generation = queued.get("generation", 0) if suffix in ("skill-control", "skill-applying") else queued.get("_lifecycle_generation", 0)
+                    if generation >= run.lifecycle_generation:
+                        return True
+                except (OSError, ValueError, AttributeError, TypeError):
+                    continue
+            outcome = result(directory, job_id)
+            if outcome and outcome.get("generation", 0) >= run.lifecycle_generation:
+                return True
+            control = {"action": run.lifecycle, "generation": run.lifecycle_generation}
+            if run.lifecycle == "updated":
+                control["payload"] = run.execution_payload
+                control["uncertain"] = run.lifecycle_uncertain
+            publish(directory / f"{job_id}.skill-control", json.dumps(control, ensure_ascii=True).encode("ascii"), replace=True)
+            return True
+    except (OSError, ValueError, DatabaseError):
+        return False
 
 
 def resolve_uncertain(job_id):
@@ -138,3 +174,10 @@ def result(directory, job_id):
         return None
     except (OSError, ValueError):
         return {"status": "failed"}
+
+
+def run_result(directory, run):
+    outcome = result(directory, run.job_id)
+    if outcome and run.lifecycle and outcome.get("generation", 0) < run.lifecycle_generation:
+        return None
+    return outcome
