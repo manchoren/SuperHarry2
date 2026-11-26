@@ -51,6 +51,10 @@ async function submitChat(event) {
   if (chatButtons[0].disabled || (sendingMessage && !input.value.trim())) return;
 
   const data = new FormData(form);
+  if (sendingMessage && window.chatFilePond) {
+    data.delete("attachment");
+    window.chatFilePond.getFiles().forEach((item) => data.append("attachment", item.file, item.filename));
+  }
   chatButtons.forEach((button) => { button.disabled = true; });
   input.readOnly = true;
   statusMessage.textContent = "Waiting for the model…";

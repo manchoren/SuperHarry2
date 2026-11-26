@@ -6,8 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %} · SuperHarry2</title>
   <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  <link rel="stylesheet" href="{% static 'superharry/vendor/filepond.min.css' %}">
   <script src="{% static 'superharry/theme.js' %}"></script>
   <script src="{% static 'superharry/chat.js' %}" defer></script>
+  <script src="{% static 'superharry/vendor/filepond.min.js' %}" defer></script>
+  <script src="{% static 'superharry/file-preview.js' %}" type="module"></script>
 </head>
 <body class="app-shell chat-page">
   {% include 'includes/navigation.html' with show_conversations=True %}
@@ -44,7 +47,7 @@
             {% if occurrence.failure_reason %}<p>Scheduled task failed: {{ occurrence.failure_reason }}</p>{% endif %}
           {% endfor %}
           <p>{{ message.content }}</p>
-          {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a></p>{% endfor %}
+          {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a> <button type="button" class="preview-file" data-url="{% url 'input-download' attachment.pk %}" data-name="{{ attachment.name }}">Preview</button></p>{% endfor %}
           {% for run in message.skill_runs.all %}
             <p><a href="{% url 'skill-run-detail' run.job_id %}">View {{ run.skill_name }} result</a></p>
           {% endfor %}
@@ -99,5 +102,13 @@
       <button type="submit">Send</button>
     </form>
   </main>
+  <aside id="file-preview" class="file-preview" aria-label="File preview" hidden>
+    <header><h2 id="preview-name">File preview</h2><button type="button" id="preview-close">Close preview</button></header>
+    <p id="preview-status" role="status"></p>
+    <img id="preview-image" alt="" hidden>
+    <canvas id="preview-pdf" aria-label="PDF page preview" hidden></canvas>
+    <div id="preview-pages" hidden><button type="button" id="preview-prev">Previous page</button> <span id="preview-page-number"></span> <button type="button" id="preview-next">Next page</button></div>
+    <a id="preview-download" hidden>Download file</a>
+  </aside>
 </body>
 </html>

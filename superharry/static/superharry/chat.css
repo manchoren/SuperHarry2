@@ -76,3 +76,10 @@ pre { overflow-x: auto; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
  .user-avatar { display: inline-flex; width: 2rem; height: 2rem; border-radius: 50%; object-fit: cover; vertical-align: middle; align-items: center; justify-content: center; }
  .avatar-initial { background: var(--accent, #4569a8); color: white; font-weight: 700; }
+ .chat-page:has(.file-preview:not([hidden])) { grid-template-columns: 16rem minmax(0, 1fr) minmax(18rem, 35vw); }
+ .file-preview { position: sticky; top: 0; height: 100vh; overflow: auto; padding: 1rem; background: var(--surface); border-left: 1px solid var(--line); }
+ .file-preview[hidden] { display: none; }
+ .file-preview header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+ .file-preview h2 { overflow-wrap: anywhere; font-size: 1rem; }
+ .file-preview img, .file-preview canvas { max-width: 100%; height: auto; }
+ @media (max-width: 800px) { .chat-page:has(.file-preview:not([hidden])) { grid-template-columns: minmax(0, 1fr); } .file-preview { position: fixed; z-index: 10; inset: 0 0 0 15%; width: 85%; box-shadow: var(--shadow); } }
