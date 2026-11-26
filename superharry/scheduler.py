@@ -169,6 +169,13 @@ def recover_occurrences():
 def run_due():
     with scheduler_lock() as acquired:
         if acquired:
+            from .models import SkillRun
+            from .skill_jobs import discard_orphan_artifacts, run_result, spool
+            directory = spool()
+            if directory is not None:
+                for run in SkillRun.objects.filter(artifacts_imported=False).iterator():
+                    run_result(directory, run)
+                discard_orphan_artifacts(directory)
             recover_occurrences()
             if settings.OMNIROUTE_URL and settings.OMNIROUTE_API_KEY:
                 _run_due()

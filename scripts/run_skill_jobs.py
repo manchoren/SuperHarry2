@@ -145,6 +145,12 @@ def _process_queue_once(spool, runtime_check=None, *, image=None, package_handle
                     raise PermissionError("Execution is no longer active")
                 return mediate_action(action, spool, identifier, active_mediator, cancelled=cancelled)
 
+            def save_artifacts(files):
+                if cancelled.is_set() or control.exists():
+                    raise ValueError("Execution is no longer active")
+                value = {"generation": request.get("_lifecycle_generation", 0), "files": files}
+                publish(spool / f"{identifier}.skill-artifacts", json.dumps(value, ensure_ascii=True).encode("ascii"), replace=True)
+
             image_options = {"image": image} if image is not None else {}
             try:
                 if request.get("_lifecycle_generation") and request.get("dependencies") and not wheels:
@@ -163,6 +169,7 @@ def _process_queue_once(spool, runtime_check=None, *, image=None, package_handle
                         request, job_id=identifier, timeout=180, cancelled=cancelled,
                         network_handler=send_network,
                         package_handler=fetch_package if request.get("operation") == "prepare" else None,
+                        artifact_handler=save_artifacts if request.get("operation") == "run" else None,
                         **image_options,
                     )
             finally:

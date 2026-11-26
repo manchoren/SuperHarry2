@@ -9,16 +9,19 @@ from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import OperationalError, transaction
 from django.db.models import F
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import content_disposition_header
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST, require_safe
 
 from .text_skills import SKILLS_DIRECTORY, parse_definition, repository_definitions, repository_path
-from .models import SkillOutbox, SkillPreparation, SkillRun, VmSkill
+from .models import SkillArtifact, SkillOutbox, SkillPreparation, SkillRun, VmSkill
 from .skill_files import validate_skill_files
 from .skill_jobs import dispatch_lifecycle, dispatch_one, encode_job, pending_network_requests, result, run_result, skill_fingerprint, spool
 from .csv_protocol import read_limited
@@ -283,7 +286,8 @@ def run(request, name):
             wheels = preparation.payload.get("wheels", {})
     except (OSError, ValueError):
         return HttpResponse("Prepared dependencies are unavailable; prepare this skill again.", status=409)
-    payload = {**preparation.payload, "operation": "run", "input": input_text, "wheels": wheels}
+    payload = {**preparation.payload, "operation": "run", "input": input_text, "wheels": wheels,
+               "output_max_count": settings.SKILL_OUTPUT_MAX_COUNT, "output_max_bytes": settings.SKILL_OUTPUT_MAX_BYTES}
     selected_files = getattr(request, "skill_input_files", [])
     if selected_files:
         if len(selected_files) > 5 or sum(len(item.payload) for item in selected_files) > 4 * 1024 * 1024:
@@ -320,6 +324,32 @@ def run_detail(request, job_id):
     return render(request, "skills/run_detail.html", {
         "job": job, "outcome": outcome, "delivery": delivery,
         "network_requests": pending_network_requests(directory, job.job_id) if outcome is None and running_is_current(directory, job) else [],
+    })
+
+
+@never_cache
+@login_required
+@require_safe
+def artifact_status(request, job_id):
+    job = get_object_or_404(SkillRun, job_id=job_id, owner=request.user)
+    outcome = run_result(spool(), job)
+    return JsonResponse({
+        "pending": outcome is None or not job.artifacts_imported,
+        "status": outcome.get("status") if outcome else None,
+        "artifacts": [{"name": artifact.name, "partial": artifact.partial,
+                       "url": reverse("skill-artifact-download", args=(artifact.pk,))}
+                      for artifact in job.artifacts.all().defer("payload")],
+    })
+
+
+@never_cache
+@login_required
+@require_safe
+def artifact_download(request, pk):
+    artifact = get_object_or_404(SkillArtifact, pk=pk, run__owner=request.user)
+    return HttpResponse(bytes(artifact.payload), content_type="application/octet-stream", headers={
+        "Content-Disposition": content_disposition_header(True, artifact.name),
+        "X-Content-Type-Options": "nosniff",
     })
 
 
@@ -428,7 +458,8 @@ def edit(request, name):
                 run.lifecycle_uncertain = uncertain
                 run.lifecycle = "updated"
                 run.lifecycle_generation += 1
-                run.save(update_fields=("execution_payload", "lifecycle", "lifecycle_generation", "lifecycle_uncertain"))
+                run.artifacts_imported = False
+                run.save(update_fields=("execution_payload", "lifecycle", "lifecycle_generation", "lifecycle_uncertain", "artifacts_imported"))
                 SkillOutbox.objects.filter(job_id=run.job_id).delete()
                 transaction.on_commit(lambda identifier=run.job_id: dispatch_lifecycle(identifier))
             form.save()

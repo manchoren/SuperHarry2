@@ -95,6 +95,7 @@ async function showFile(name, file, url = null) {
   }
 }
 
+window.previewChatFile = (name, url) => showFile(name, null, url);
 document.querySelector("#preview-close").addEventListener("click", () => { reset(); panel.hidden = true; });
 previous.addEventListener("click", () => { if (pdf && currentPage > 1) { currentPage--; renderPage().catch(() => { status.textContent = "Preview is unavailable for this file."; }); } });
 next.addEventListener("click", () => { if (pdf && currentPage < pdf.numPages) { currentPage++; renderPage().catch(() => { status.textContent = "Preview is unavailable for this file."; }); } });

@@ -1,8 +1,11 @@
 """Execute one skill inside a disposable, externally constrained container."""
 import base64
 import html
+import hashlib
 import json
+import os
 import re
+import stat
 import socket
 import subprocess
 import sys
@@ -16,6 +19,8 @@ from skill_files import validate_skill_files
 
 MAX_REQUEST = 8 * 1024 * 1024
 MAX_OUTPUT = 16 * 1024
+MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
+MAX_ARTIFACT_COUNT = 5
 exchange_lock = threading.Lock()
 
 
@@ -118,6 +123,11 @@ def serve_network(path):
 def main():
     stage = "preparation"
     reason = "invalid_request"
+    collect_outputs = False
+    output_dir = Path("/work/output")
+    artifact_count = MAX_ARTIFACT_COUNT
+    artifact_bytes = MAX_ARTIFACT_BYTES
+    baselines = {}
     try:
         raw = sys.stdin.buffer.readline(MAX_REQUEST + 1)
         if len(raw) > MAX_REQUEST:
@@ -172,6 +182,10 @@ def main():
                     proxy.shutdown()
                     proxy.server_close()
         root = Path("/work")
+        artifact_count = request.get("output_max_count", MAX_ARTIFACT_COUNT)
+        artifact_bytes = request.get("output_max_bytes", MAX_ARTIFACT_BYTES)
+        if type(artifact_count) is not int or not 1 <= artifact_count <= MAX_ARTIFACT_COUNT or type(artifact_bytes) is not int or not 1 <= artifact_bytes <= MAX_ARTIFACT_BYTES:
+            raise ValueError("Invalid output limits")
         selected_files = request.get("input_files", [])
         if not isinstance(selected_files, list) or len(selected_files) > 5 or (request.get("requires_file_inputs") and not selected_files):
             raise ValueError("Invalid selected files")
@@ -192,6 +206,8 @@ def main():
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(contents)
             manifest.append({"id": item["id"], "name": item["name"], "path": str(target)})
+            digest = hashlib.sha256(contents).digest()
+            baselines[item["name"]] = digest if item["name"] not in baselines else None
         environment["SKILL_INPUT_MANIFEST"] = json.dumps(manifest, ensure_ascii=True)
         reason = "file_preparation_failed"
         for name, content in files.items():
@@ -203,6 +219,11 @@ def main():
             return
         stage = "execution"
         reason = "execution_failed"
+        if any(name == "output" or name.startswith("output/") for name in files):
+            raise ValueError("The output directory is reserved")
+        output_dir.mkdir(exist_ok=True)
+        environment["SKILL_OUTPUT_DIR"] = str(output_dir)
+        collect_outputs = True
         sys.stdout.write('{"kind":"execution"}\n')
         sys.stdout.flush()
         socket_path = root / ".skill-network.sock"
@@ -213,17 +234,57 @@ def main():
             if socket_path.exists():
                 break
             time.sleep(0.01)
+        timeout = request.get("execution_timeout", 150)
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 150:
+            raise ValueError("Invalid execution timeout")
         completed = subprocess.run(
             [sys.executable, "-sB", str(root / entrypoint)],
             input=input_text.encode("utf-8"), cwd=root,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=150, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout, check=True,
             env={**environment, "PYTHONPATH": "/env/packages:/", "SKILL_NETWORK_SOCKET": str(socket_path)},
         )
         if len(completed.stdout) > MAX_OUTPUT:
             raise ValueError("Output too large")
         result = {"status": "complete", "output": completed.stdout.decode("utf-8")}
+    except subprocess.TimeoutExpired:
+        result = {"status": "timeout", "stage": stage, "reason": "execution_timeout"}
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
         result = {"status": "failed", "stage": stage, "reason": reason}
+    if collect_outputs:
+        try:
+            artifacts = []
+            total = 0
+            directory_fd = os.open(output_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                for name in sorted(os.listdir(directory_fd)):
+                    if not name or len(name.encode("utf-8")) > 255:
+                        raise ValueError("Invalid output file")
+                    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                    with os.fdopen(os.open(name, flags, dir_fd=directory_fd), "rb") as handle:
+                        verified = os.fstat(handle.fileno())
+                        if not stat.S_ISREG(verified.st_mode) or verified.st_nlink != 1 or verified.st_size > artifact_bytes - total:
+                            raise ValueError("Invalid output file")
+                        contents = handle.read(artifact_bytes - total + 1)
+                    total += len(contents)
+                    if total > artifact_bytes:
+                        raise ValueError("Output limit exceeded")
+                    if baselines.get(name) == hashlib.sha256(contents).digest():
+                        total -= len(contents)
+                        continue
+                    if len(artifacts) >= artifact_count:
+                        raise ValueError("Output limit exceeded")
+                    artifacts.append({"name": name, "data": base64.b64encode(contents).decode("ascii")})
+            finally:
+                os.close(directory_fd)
+            if artifacts:
+                with exchange_lock:
+                    sys.stdout.write(json.dumps({"kind": "artifacts", "files": artifacts}, ensure_ascii=True) + "\n")
+                    sys.stdout.flush()
+                    acknowledgement = json.loads(sys.stdin.buffer.readline(4096))
+                if acknowledgement.get("status") != "complete":
+                    raise ValueError("Output persistence failed")
+        except (OSError, ValueError, UnicodeError):
+            result = {"status": "failed", "stage": "execution", "reason": "output_limit_or_invalid"}
     sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 

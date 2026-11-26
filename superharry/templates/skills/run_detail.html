@@ -13,6 +13,7 @@
   {% elif outcome.reason == 'skill_changed_uncertain' %}<p>Skill updated; execution stopped because prior external activity is unknown. The run was not automatically repeated.</p>
   {% elif outcome.reason == 'skill_changed_unavailable' %}<p>Skill updated; execution stopped because the original entrypoint is unavailable.</p>
   {% else %}<p>Execution failed.</p>{% endif %}
+  {% for artifact in job.artifacts.all %}<p><a href="{% url 'skill-artifact-download' artifact.pk %}">Download {{ artifact.name }}</a>{% if artifact.partial %} (partial result){% endif %}</p>{% endfor %}
   {% for action in network_requests %}
     <section>
       <h2>Network request awaiting approval</h2>

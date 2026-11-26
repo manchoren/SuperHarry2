@@ -1,5 +1,7 @@
 """Exercise local and saved file previews with an isolated browser and database."""
 import os
+import base64
+import json
 import tempfile
 import threading
 from io import BytesIO
@@ -20,12 +22,13 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
     from django.core.management import call_command
     from django.core.wsgi import get_wsgi_application
     from django.db import connections
-    from superharry.models import ChatInput, Conversation, Message
+    from superharry.models import ChatInput, Conversation, Message, SkillRun
 
     call_command("migrate", verbosity=0)
     settings.OMNIROUTE_URL = "http://fixture"
     settings.OMNIROUTE_API_KEY = "fixture"
     settings.CHAT_MODEL = "fixture/model"
+    settings.SKILL_SPOOL = directory
     gateway = patch("superharry.chat.stream_reply", side_effect=lambda *args, **kwargs: (text for text in ["saved"]))
     gateway.start()
     user = get_user_model().objects.create_user(username="preview-user", password="synthetic-password-32")
@@ -38,6 +41,10 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
     picture = BytesIO()
     Image.new("RGB", (32, 24), "blue").save(picture, "PNG")
     ChatInput.objects.create(owner=user, message=message, name="picture.png", media_type="application/octet-stream", payload=picture.getvalue())
+    reply = Message.objects.create(conversation=conversation, role="assistant", content="Generated file")
+    job = SkillRun.objects.create(owner=user, reply=reply, skill_name="demo", repository_skill=True)
+    (Path(directory) / f"{job.job_id}.skill-result").write_text(json.dumps({"status": "complete", "output": "done"}))
+    (Path(directory) / f"{job.job_id}.skill-artifacts").write_text(json.dumps({"generation": 0, "files": [{"name": "generated.pdf", "data": base64.b64encode(document.getvalue()).decode()}]}))
     server = make_server("127.0.0.1", 0, StaticFilesHandler(get_wsgi_application()))
 
     def serve():
@@ -58,6 +65,10 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_label("Password:").fill("synthetic-password-32")
             page.get_by_role("button", name="Sign in").click()
             page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
+            page.get_by_text("Download generated.pdf").wait_for()
+            page.locator(".skill-artifacts button").click()
+            page.get_by_text("Page 1 of 1").wait_for()
+            page.get_by_role("button", name="Close preview").click()
             page.locator(".preview-file").first.click()
             page.get_by_text("Page 1 of 1").wait_for()
             assert page.locator("#preview-pdf").is_visible()

@@ -84,12 +84,23 @@ class SkillRun(models.Model):
     skill = models.ForeignKey(VmSkill, null=True, on_delete=models.SET_NULL)
     skill_name = models.CharField(max_length=48)
     repository_skill = models.BooleanField(default=False)
-    reply = models.ForeignKey("Message", null=True, blank=True, on_delete=models.SET_NULL, related_name="skill_runs")
+    reply = models.ForeignKey("Message", null=True, blank=True, on_delete=models.CASCADE, related_name="skill_runs")
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     lifecycle = models.CharField(max_length=16, blank=True, default="")
     lifecycle_generation = models.PositiveIntegerField(default=0)
     lifecycle_uncertain = models.BooleanField(default=False)
     execution_payload = models.JSONField(default=dict)
+    artifacts_imported = models.BooleanField(default=False)
+
+
+class SkillArtifact(models.Model):
+    run = models.ForeignKey(SkillRun, on_delete=models.CASCADE, related_name="artifacts")
+    name = models.CharField(max_length=255)
+    payload = models.BinaryField()
+    partial = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("run", "name"), name="unique_skill_artifact_name")]
 
 
 class SkillOutbox(models.Model):

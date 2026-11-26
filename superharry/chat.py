@@ -466,7 +466,8 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
                                     require_unambiguous_file_choice(reply.prompt.content, [selected], candidates)
                                     source = (SKILLS_DIRECTORY / "csv-summary" / "main.py").read_text(encoding="utf-8")
                                     payload = {"operation": "run", "files": {"main.py": source}, "entrypoint": "main.py",
-                                               "input": bytes(selected.payload).decode("utf-8"), "dependencies": [], "wheels": {}}
+                                               "input": bytes(selected.payload).decode("utf-8"), "dependencies": [], "wheels": {},
+                                               "output_max_count": settings.SKILL_OUTPUT_MAX_COUNT, "output_max_bytes": settings.SKILL_OUTPUT_MAX_BYTES}
                                     identifier = uuid4()
                                     with transaction.atomic():
                                         job = SkillRun.objects.create(owner=submission.owner, reply=reply, skill_name="csv-summary", repository_skill=True,
@@ -508,11 +509,14 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
                                         raise ValueError("Insufficient response space to show the run link.")
                                     with transaction.atomic():
                                         response = run(request, args["name"])
-                                        if scheduled and response.status_code == 302:
+                                        if response.status_code == 302:
                                             from .models import SkillRun
                                             run_id = UUID(response["Location"].strip("/").split("/")[-1])
                                             job = SkillRun.objects.get(job_id=run_id, owner=submission.owner)
-                                            ScheduleOccurrence.objects.filter(reply=reply, schedule__owner=submission.owner).update(skill_run=job)
+                                            job.reply = reply
+                                            job.save(update_fields=("reply",))
+                                            if scheduled:
+                                                ScheduleOccurrence.objects.filter(reply=reply, schedule__owner=submission.owner).update(skill_run=job)
                                     tool_result = (f"Skill run queued. View its result and any approval requests at {response['Location']}."
                                                    if response.status_code == 302 else response.content.decode("utf-8"))
                                     notice = "\n" + tool_result + "\n"

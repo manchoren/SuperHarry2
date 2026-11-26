@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 
 MAX_REQUEST = 8 * 1024 * 1024
-MAX_RESPONSE = 100 * 1024
+MAX_RESPONSE = 3 * 1024 * 1024
 MAX_OUTPUT = 16 * 1024
 
 
@@ -29,8 +29,10 @@ def remove_container(job_id):
         return False
 
 
-def run_skill(request, timeout=30, job_id=None, *, image="superharry-skill-worker:local", network_handler=None, package_handler=None, cancelled=None):
+def run_skill(request, timeout=30, job_id=None, *, image="superharry-skill-worker:local", network_handler=None, package_handler=None, cancelled=None, artifact_handler=None):
     try:
+        request = dict(request)
+        request["execution_timeout"] = min(150, max(0.1, timeout - 2))
         payload = json.dumps(request, ensure_ascii=True).encode("utf-8")
     except (TypeError, ValueError):
         return {"status": "failed"}
@@ -47,7 +49,7 @@ def run_skill(request, timeout=30, job_id=None, *, image="superharry-skill-worke
         "--tmpfs=/env:rw,nosuid,nodev,size=64m,mode=1777", image,
     ]
     try:
-        outcome = _execute(command, payload, timeout, network_handler, package_handler, cancelled)
+        outcome = _execute(command, payload, timeout, network_handler, package_handler, cancelled, artifact_handler)
     finally:
         cleanup_verified = remove_container(job_id)
     if not cleanup_verified:
@@ -55,9 +57,10 @@ def run_skill(request, timeout=30, job_id=None, *, image="superharry-skill-worke
     return outcome
 
 
-def _execute(command, payload, timeout, network_handler=None, package_handler=None, cancelled=None):
+def _execute(command, payload, timeout, network_handler=None, package_handler=None, cancelled=None, artifact_handler=None):
     process = None
     results = []
+    captured_artifacts = []
     overflow = threading.Event()
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -74,6 +77,28 @@ def _execute(command, payload, timeout, network_handler=None, package_handler=No
                         raise ValueError("Invalid worker message")
                     if message.get("kind") == "execution":
                         preparing = False
+                    elif message.get("kind") == "artifacts":
+                        files = message.get("files")
+                        try:
+                            if captured_artifacts or not isinstance(files, list) or not 1 <= len(files) <= 5:
+                                raise ValueError("Invalid output list")
+                            names = set()
+                            total = 0
+                            for item in files:
+                                if not isinstance(item, dict) or set(item) != {"name", "data"} or not isinstance(item["name"], str) or not item["name"] or len(item["name"].encode("utf-8")) > 255 or item["name"] in names or any(char in item["name"] for char in ("/", "\\", "\x00")) or not isinstance(item["data"], str):
+                                    raise ValueError("Invalid output file")
+                                names.add(item["name"])
+                                total += len(base64.b64decode(item["data"], validate=True))
+                                if total > 2 * 1024 * 1024:
+                                    raise ValueError("Output is too large")
+                            if artifact_handler is not None:
+                                artifact_handler(files)
+                            captured_artifacts.extend(files)
+                            response = {"status": "complete"}
+                        except (OSError, ValueError, TypeError):
+                            response = {"status": "failed"}
+                        process.stdin.write(json.dumps(response).encode("ascii") + b"\n")
+                        process.stdin.flush()
                     elif message.get("kind") in ("network", "package"):
                         count += 1
                         handler = (package_handler if message.get("kind") == "package" and preparing
@@ -143,16 +168,26 @@ def _execute(command, payload, timeout, network_handler=None, package_handler=No
         if len(results) != 1:
             return {"status": "failed"}
         result = results[0]
-        if not isinstance(result, dict) or result.get("status") not in ("complete", "failed"):
+        if not isinstance(result, dict) or result.get("status") not in ("complete", "failed", "timeout"):
             return {"status": "failed"}
         if result["status"] == "complete":
             if not isinstance(result.get("output"), str) or len(result["output"].encode("utf-8")) > MAX_OUTPUT:
                 return {"status": "failed"}
-            return {"status": "complete", "output": result["output"]}
+            outcome = {"status": "complete", "output": result["output"]}
+            if captured_artifacts and artifact_handler is None:
+                outcome["artifacts"] = captured_artifacts
+            return outcome
+        if result["status"] == "timeout":
+            outcome = {"status": "timeout"}
+            if captured_artifacts and artifact_handler is None:
+                outcome["artifacts"] = captured_artifacts
+            return outcome
         if result.get("stage") in ("preparation", "execution"):
             failure = {"status": "failed", "stage": result["stage"]}
-            if result.get("reason") in ("invalid_request", "dependency_preparation_failed", "file_preparation_failed", "execution_failed"):
+            if result.get("reason") in ("invalid_request", "dependency_preparation_failed", "file_preparation_failed", "execution_failed", "output_limit_or_invalid"):
                 failure["reason"] = result["reason"]
+            if captured_artifacts and artifact_handler is None:
+                failure["artifacts"] = captured_artifacts
             return failure
         return {"status": "failed"}
     except (OSError, ValueError, subprocess.SubprocessError):

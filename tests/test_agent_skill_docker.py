@@ -51,7 +51,7 @@ class AgentSkillDockerTests(TransactionTestCase):
         chosen = ChatInput.objects.create(owner=owner, message=prompt, name='chosen.txt', media_type='text/plain', payload=b'original')
         ChatInput.objects.create(owner=owner, message=prompt, name='other.txt', media_type='text/plain', payload=b'private-other')
         selected_id.append(chosen.pk)
-        code = "import json, os; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); print(f[0]['name'], p.read_text(), len(list(p.parent.iterdir()))); p.write_text('modified')"
+        code = "import json, os; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); print(f[0]['name'], p.read_text(), len(list(p.parent.iterdir()))); o=Path(os.environ['SKILL_OUTPUT_DIR']); (o/'chosen.txt').write_bytes(p.read_bytes()); (o/'result.txt').write_text('generated'); p.write_text('modified')"
         with TemporaryDirectory() as directory, override_settings(SKILL_SPOOL=directory, OMNIROUTE_URL=f'http://127.0.0.1:{server.server_port}', OMNIROUTE_API_KEY='synthetic', CHAT_MODEL='test/model'):
             self.client.post('/skills/new/', {'name': 'file-probe', 'purpose': 'Read', 'instructions': 'Read selected', 'files': json.dumps({'main.py': code}), 'dependencies': '[]'})
             self.client.post('/skills/file-probe/prepare/', {'entrypoint': 'main.py'})
@@ -61,6 +61,14 @@ class AgentSkillDockerTests(TransactionTestCase):
             run = SkillRun.objects.get(owner=owner, skill_name='file-probe')
             process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local'))
             self.assertContains(self.client.get(f'/skill-runs/{run.job_id}/'), 'chosen.txt original 1')
+            response = self.client.get(f'/skill-runs/{run.job_id}/artifacts/')
+            artifacts = response.json()['artifacts']
+            self.assertEqual([item['name'] for item in artifacts], ['result.txt'])
+            self.assertEqual(self.client.get(artifacts[0]['url']).content, b'generated')
+            other_client = self.client_class()
+            other_client.force_login(get_user_model().objects.create_user(username='file-docker-other'))
+            self.assertEqual(other_client.get(artifacts[0]['url']).status_code, 404)
+            self.assertFalse(list(Path(directory).glob('*.skill-artifacts')))
             chosen.refresh_from_db()
             self.assertEqual(bytes(chosen.payload), b'original')
             self.assertFalse(list(Path(directory).glob('*.skill-running')))

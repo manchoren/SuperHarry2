@@ -3,7 +3,9 @@ import base64
 import io
 import os
 import subprocess
+import tempfile
 import zipfile
+from pathlib import Path
 from uuid import uuid4
 
 from scripts.skill_sandbox import container_name, run_skill as execute_skill
@@ -51,6 +53,37 @@ def main():
     assert result == {"status": "complete", "output": "selected.txt original 1\n"}, result
     result = run_skill({"files": {"main.py": "print('unexpected')"}, "entrypoint": "main.py", "input": "", "requires_file_inputs": True})
     assert result["status"] == "failed", result
+    for source, status in (
+        ("from pathlib import Path; Path('/work/output/result.txt').write_text('done'); print('ok')", "complete"),
+        ("from pathlib import Path; Path('/work/output/result.txt').write_text('partial'); raise ValueError()", "failed"),
+        ("from pathlib import Path; import time; Path('/work/output/result.txt').write_text('partial'); time.sleep(20)", "timeout"),
+    ):
+        result = run_skill({"files": {"main.py": source}, "entrypoint": "main.py", "input": ""}, timeout=5)
+        assert result["status"] == status, result
+        assert base64.b64decode(result["artifacts"][0]["data"]) == (b"done" if status == "complete" else b"partial"), result
+    with tempfile.TemporaryDirectory(prefix="skill-output-") as directory:
+        identifier = uuid4()
+        test_jobs.append(identifier)
+        captured = Path(directory) / "artifact"
+
+        def persist_before_cleanup(files):
+            running = subprocess.check_output(["docker", "inspect", "--format", "{{.State.Running}}", container_name(identifier)], text=True).strip()
+            if running != "true":
+                raise ValueError("Sandbox was removed before output persistence")
+            captured.write_bytes(base64.b64decode(files[0]["data"]))
+
+        result = execute_skill({"files": {"main.py": "from pathlib import Path; Path('/work/output/a.txt').write_text('saved')"}, "entrypoint": "main.py", "input": ""},
+                               job_id=identifier, timeout=10, artifact_handler=persist_before_cleanup,
+                               image=os.environ.get("SKILL_TEST_IMAGE", "superharry-skill-worker:local"))
+        assert result["status"] == "complete" and captured.read_bytes() == b"saved", result
+    for source, limits in (
+        ("from pathlib import Path; Path('/work/output/a').write_bytes(b'12345')", {"output_max_bytes": 4}),
+        ("from pathlib import Path; Path('/work/output/a').touch(); Path('/work/output/b').touch()", {"output_max_count": 1}),
+        ("from pathlib import Path; Path('/work/output/link').symlink_to('/etc/passwd')", {}),
+        ("from pathlib import Path; Path('/work/output').rmdir(); Path('/work/output').symlink_to('/etc')", {}),
+    ):
+        result = run_skill({"files": {"main.py": source}, "entrypoint": "main.py", "input": "", **limits})
+        assert result["status"] == "failed" and not result.get("artifacts"), result
     result = run_skill({
         "files": {"main.py": "from demo_skill_dep import value; print(value())"},
         "entrypoint": "main.py", "input": "", "dependencies": ["demo-skill-dep==1.0"],

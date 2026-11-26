@@ -21,6 +21,8 @@ USE_TZ = True
 AVATAR_MAX_BYTES = int(os.environ.get("DJANGO_AVATAR_MAX_BYTES", str(2 * 1024 * 1024)))
 CHAT_ATTACHMENT_MAX_BYTES = int(os.environ.get("DJANGO_CHAT_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
 CHAT_ATTACHMENT_MAX_COUNT = int(os.environ.get("DJANGO_CHAT_ATTACHMENT_MAX_COUNT", "5"))
+SKILL_OUTPUT_MAX_COUNT = int(os.environ.get("DJANGO_SKILL_OUTPUT_MAX_COUNT", "5"))
+SKILL_OUTPUT_MAX_BYTES = int(os.environ.get("DJANGO_SKILL_OUTPUT_MAX_BYTES", str(2 * 1024 * 1024)))
 
 INSTALLED_APPS = [
     "django.contrib.admin",

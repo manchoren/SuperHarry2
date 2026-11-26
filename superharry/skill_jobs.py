@@ -1,5 +1,6 @@
 """Bounded spool protocol shared by Django and the host skill worker."""
 import hashlib
+import base64
 import json
 from pathlib import Path
 from uuid import UUID
@@ -9,7 +10,7 @@ from django.db import DatabaseError, connection, transaction
 from django.db.models import F
 
 from .csv_protocol import publish, read_limited
-from .models import SkillOutbox, SkillPreparation, SkillRun
+from .models import SkillArtifact, SkillOutbox, SkillPreparation, SkillRun
 
 
 MAX_JOB_BYTES = 8 * 1024 * 1024
@@ -180,4 +181,74 @@ def run_result(directory, run):
     outcome = result(directory, run.job_id)
     if outcome and run.lifecycle and outcome.get("generation", 0) < run.lifecycle_generation:
         return None
+    if outcome and not run.artifacts_imported:
+        import_artifacts(directory, run, outcome)
+    elif outcome and run.artifacts_imported and directory is not None:
+        discard_artifact_spool(directory / f"{run.job_id}.skill-artifacts")
     return outcome
+
+
+def discard_artifact_spool(path):
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def discard_orphan_artifacts(directory):
+    if directory is None:
+        return
+    for path in directory.glob("*.skill-artifacts"):
+        try:
+            identifier = UUID(path.name.removesuffix(".skill-artifacts"))
+        except ValueError:
+            continue
+        if not (directory / f"{identifier}.skill-result").exists() or (directory / f"{identifier}.skill-running").exists():
+            continue
+        if not SkillRun.objects.filter(job_id=identifier).exists():
+            discard_artifact_spool(path)
+
+
+def import_artifacts(directory, run, outcome):
+    if directory is None:
+        return
+    path = directory / f"{run.job_id}.skill-artifacts"
+    try:
+        raw = read_limited(path, 3 * 1024 * 1024)
+    except FileNotFoundError:
+        raw = None
+    except (OSError, ValueError):
+        return
+    try:
+        envelope = json.loads(raw) if raw is not None else {"generation": outcome.get("generation", 0), "files": []}
+        files = envelope["files"]
+        if not isinstance(files, list) or len(files) > 5 or envelope.get("generation", 0) != outcome.get("generation", 0):
+            return
+        decoded = []
+        names = set()
+        total = 0
+        for item in files:
+            name = item["name"]
+            if not isinstance(name, str) or not name or len(name.encode("utf-8")) > 255 or name in names or any(char in name for char in ("/", "\\", "\x00")):
+                raise ValueError
+            content = base64.b64decode(item["data"], validate=True)
+            total += len(content)
+            if total > 2 * 1024 * 1024:
+                raise ValueError
+            names.add(name)
+            decoded.append((name, content))
+        with transaction.atomic():
+            SkillRun.objects.filter(pk=run.pk).update(artifacts_imported=F("artifacts_imported"))
+            current = SkillRun.objects.select_for_update().filter(pk=run.pk).first()
+            if current is None:
+                return
+            if not current.artifacts_imported:
+                for name, content in decoded:
+                    SkillArtifact.objects.update_or_create(run=current, name=name, defaults={"payload": content, "partial": outcome.get("status") != "complete"})
+                current.artifacts_imported = True
+                current.save(update_fields=("artifacts_imported",))
+            run.artifacts_imported = True
+            if raw is not None:
+                transaction.on_commit(lambda: discard_artifact_spool(path))
+    except (DatabaseError, KeyError, TypeError, ValueError, UnicodeError, OSError):
+        return

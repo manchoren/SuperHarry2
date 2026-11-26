@@ -50,6 +50,7 @@
           {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a> <button type="button" class="preview-file" data-url="{% url 'input-download' attachment.pk %}" data-name="{{ attachment.name }}">Preview</button></p>{% endfor %}
           {% for run in message.skill_runs.all %}
             <p><a href="{% url 'skill-run-detail' run.job_id %}">View {{ run.skill_name }} result</a></p>
+            <div class="skill-artifacts" data-status-url="{% url 'skill-artifact-status' run.job_id %}" aria-live="polite"></div>
           {% endfor %}
           {% if message.in_progress %}
             <small>Reply in progress</small>

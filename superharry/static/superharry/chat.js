@@ -93,3 +93,36 @@ async function submitChat(event) {
 }
 
 chatForms.forEach((form) => form.addEventListener("submit", submitChat));
+
+document.querySelectorAll(".skill-artifacts").forEach((container) => {
+  async function refresh() {
+    try {
+      const response = await fetch(container.dataset.statusUrl, {cache: "no-store"});
+      if (!response.ok) return;
+      const value = await response.json();
+      container.replaceChildren();
+      value.artifacts.forEach((artifact) => {
+        const row = document.createElement("p");
+        const link = document.createElement("a");
+        link.href = artifact.url;
+        link.textContent = `Download ${artifact.name}`;
+        row.append(link);
+        const preview = document.createElement("button");
+        preview.type = "button";
+        preview.textContent = "Preview";
+        preview.addEventListener("click", async () => {
+          if (!window.previewChatFile) await import("./file-preview.js");
+          window.previewChatFile(artifact.name, artifact.url);
+        });
+        row.append(document.createTextNode(" "), preview);
+        if (artifact.partial) row.append(document.createTextNode(" (partial result)"));
+        container.append(row);
+      });
+      if (value.pending) window.setTimeout(refresh, 3000);
+      else if (value.status !== "complete" && value.artifacts.length) container.append(document.createTextNode("Execution failed or timed out; these files are partial."));
+    } catch {
+      window.setTimeout(refresh, 5000);
+    }
+  }
+  refresh();
+});
