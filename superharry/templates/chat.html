@@ -107,7 +107,7 @@
           <small>Use <code>/summarize</code> followed by text for a quick summary.</small></div>
         </details>
         <span id="selected-skill-label" class="selected-skill-label" aria-live="polite"></span>
-        <span class="composer-model" aria-label="Active model">{{ active_model|default:"Not configured" }}</span>
+        <span class="composer-model" aria-label="Active model">Model: {{ active_model|default:"Not configured" }}</span>
         <button type="submit">Send</button>
       </div>
     </form>

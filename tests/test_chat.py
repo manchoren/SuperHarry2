@@ -132,6 +132,7 @@ class ChatTests(TestCase):
         response = self.client.post('/chat/send/', {'message': 'Help me', 'selected_skill': 'summarize'})
         list(response.streaming_content)
         self.assertIn('"name": "summarize"', self.requests[-1][2]['messages'][1]['content'])
+        self.assertIn('Use it for this request', self.requests[-1][2]['messages'][1]['content'])
         self.assertContains(self.client.get(response['Location']), 'Skill: summarize')
         self.assertEqual(self.client.post('/chat/send/', {'message': 'Help', 'selected_skill': 'missing'}).status_code, 400)
 
