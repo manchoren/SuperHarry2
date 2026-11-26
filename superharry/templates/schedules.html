@@ -1,10 +1,9 @@
+﻿{% extends 'memories/base.html' %}
 {% load tz %}
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Schedules</title></head>
-<body>
-  <h1>Schedules</h1>
-  <p><a href="{% url 'chat' %}">Back to chat</a></p>
+{% block title %}Schedules{% endblock %}
+{% block content %}
+<h1>Schedules</h1>
+
   {% for schedule in schedules %}
     <article>
       <h2>Scheduled task #{{ schedule.pk }}</h2>
@@ -31,5 +30,4 @@
       {% endif %}
     </article>
   {% empty %}<p>No schedules yet.</p>{% endfor %}
-</body>
-</html>
+{% endblock %}

@@ -37,6 +37,8 @@ class CsvSummaryTests(TestCase):
             "status": "complete", "summary": summary,
         }), encoding="utf-8")
         self.assertContains(self.client.get("/"), "Previous CSV results")
+        self.assertContains(self.client.get("/memories/"), "Previous CSV results")
+        self.assertNotContains(other.get("/memories/"), "Previous CSV results")
         self.assertContains(self.client.get("/csv/"), "sales.csv")
         self.assertContains(self.client.get(detail), "Amount (1 empty cells)")
         self.assertEqual(self.client.get(f"{detail}download/").json(), summary)

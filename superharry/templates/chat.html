@@ -6,29 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %} · SuperHarry2</title>
   <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  <script src="{% static 'superharry/theme.js' %}"></script>
   <script src="{% static 'superharry/chat.js' %}" defer></script>
 </head>
-<body>
-  <aside>
-    <a href="{% url 'inputs' %}">Chat inputs</a>
-    <a href="{% url 'schedules' %}">Schedules</a>
-    <a href="{% url 'memories' %}">Saved memories</a>
-    <a href="{% url 'skills' %}">Skills</a>
-    {% if has_previous_csv_results %}<a href="{% url 'csv-upload' %}">Previous CSV results</a>{% endif %}
-    <nav aria-label="Conversations">
-      <a href="{% url 'chat' %}">New chat</a>
-      <ul>
-        {% for item in conversations %}
-          <li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }}</a></li>
-        {% endfor %}
-      </ul>
-    </nav>
-    <form action="{% url 'logout' %}" method="post">
-      {% csrf_token %}
-      <button type="submit">Sign out</button>
-    </form>
-  </aside>
-  <main>
+<body class="app-shell chat-page">
+  {% include 'includes/navigation.html' with show_conversations=True %}
+  <main class="main-content chat-content">
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
     <p>Model: {{ active_model|default:"Not configured" }}</p>
     {% for schedule in schedules %}

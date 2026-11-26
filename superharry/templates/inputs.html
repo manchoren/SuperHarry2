@@ -1,7 +1,8 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Chat inputs</title></head>
-<body><h1>Chat inputs</h1>
-<p><a href="{% url 'chat' %}">Back to chat</a></p>
+{% extends 'memories/base.html' %}
+{% block title %}Chat inputs{% endblock %}
+{% block content %}
+<h1>Chat inputs</h1>
+
 <p>The model receives your input names and IDs in chat. Input contents are sent only when selected for scheduled work.</p>
 {% if error %}<p role="alert">{{ error }}</p>{% endif %}
 <form method="post" enctype="multipart/form-data">{% csrf_token %}
@@ -11,4 +12,4 @@
 <ul>{% for item in inputs %}<li>Input #{{ item.pk }}: {{ item.name }}
 <form method="post" action="{% url 'input-delete' item.pk %}">{% csrf_token %}<button type="submit">Delete</button></form>
 </li>{% empty %}<li>No inputs yet.</li>{% endfor %}</ul>
-</body></html>
+{% endblock %}

@@ -1,12 +1,16 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in · SuperHarry2</title>
+  <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  <script src="{% static 'superharry/theme.js' %}"></script>
 </head>
-<body>
-  <main>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand"><span class="brand-mark" aria-hidden="true">S</span> SuperHarry</div>
     <h1>Sign in</h1>
     <form method="post">
       {% csrf_token %}
@@ -14,6 +18,7 @@
       <input type="hidden" name="next" value="{{ next }}">
       <button type="submit">Sign in</button>
     </form>
+    {% include 'includes/theme.html' %}
   </main>
 </body>
 </html>

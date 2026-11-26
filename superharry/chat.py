@@ -23,7 +23,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .gateway import GatewayFailure, available_routes, stream_reply
 from .memories import relevant_memory_excerpts
-from .models import ChatInput, ChatLimits, ChatRoute, Conversation, CsvFile, Message, Schedule, ScheduleOccurrence
+from .models import ChatInput, ChatLimits, ChatRoute, Conversation, Message, Schedule, ScheduleOccurrence
 from .quota import AdmissionDenied, admit
 from .schedule_time import resolve_wall_time
 from .text_skills import text_skill
@@ -189,7 +189,6 @@ def page(request, conversation_id=None):
         "conversation": conversation,
         "history": history,
         "active_model": ChatRoute.active_id(),
-        "has_previous_csv_results": CsvFile.objects.filter(owner=request.user, summary__isnull=False).exists(),
         "submission_id": uuid4(),
         "schedules": Schedule.objects.filter(owner=request.user, conversation=conversation).annotate(
             running=Exists(ScheduleOccurrence.objects.filter(schedule_id=OuterRef("pk"), status__in=("claimed", "running")))

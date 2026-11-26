@@ -1,0 +1,22 @@
+<button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-sidebar">Menu</button>
+<aside id="site-sidebar" class="sidebar">
+  <a class="brand" href="{% url 'chat' %}"><span class="brand-mark" aria-hidden="true">S</span> SuperHarry</a>
+  <nav class="primary-nav" aria-label="Main navigation">
+    <a href="{% url 'chat' %}">New chat</a>
+    <a href="{% url 'inputs' %}">Chat inputs</a>
+    <a href="{% url 'schedules' %}">Schedules</a>
+    <a href="{% url 'memories' %}">Saved memories</a>
+    <a href="{% url 'skills' %}">Skills</a>
+    {% if has_previous_csv_results %}<a href="{% url 'csv-upload' %}">Previous CSV results</a>{% endif %}
+  </nav>
+  {% if show_conversations %}
+  <nav class="conversation-nav" aria-label="Conversations">
+    <h2>Conversations</h2>
+    <ul>{% for item in conversations %}<li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }}</a></li>{% empty %}<li class="muted">No conversations yet</li>{% endfor %}</ul>
+  </nav>
+  {% endif %}
+  <div class="sidebar-footer">
+    {% include 'includes/theme.html' %}
+    <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="subtle-button" type="submit">Sign out</button></form>
+  </div>
+</aside>
