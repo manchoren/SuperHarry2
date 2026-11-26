@@ -15,7 +15,7 @@ COMPOSE_FILES = (
     "compose.omniroute.yaml",
     "compose.omniroute-management.yaml",
 )
-BUILD_FILES = ("Dockerfile", ".dockerignore", "requirements.txt", "skill_worker.py", *COMPOSE_FILES,
+BUILD_FILES = ("Dockerfile", ".dockerignore", "requirements.txt", "SOUL.md", "skill_worker.py", *COMPOSE_FILES,
                "compose.csv.yaml", "compose.skill.yaml")
 BUILD_DIRECTORIES = ("superharry", "scripts", "tests")
 POLL_SECONDS = 1
