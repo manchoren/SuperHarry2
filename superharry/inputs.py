@@ -1,9 +1,22 @@
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse
+from django.utils.http import content_disposition_header
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .models import ChatInput
+
+
+@never_cache
+@login_required
+@require_GET
+def download(request, pk):
+    item = get_object_or_404(ChatInput, pk=pk, owner=request.user, message__conversation__owner=request.user)
+    return HttpResponse(bytes(item.payload), content_type="application/octet-stream", headers={
+        "Content-Disposition": content_disposition_header(True, item.name),
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 @never_cache

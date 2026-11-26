@@ -29,6 +29,7 @@ urlpatterns = [
     path("csv/<int:pk>/download/", csv_views.download, name="csv-download"),
     path("inputs/", inputs.manage, name="inputs"),
     path("inputs/<int:pk>/delete/", inputs.delete, name="input-delete"),
+    path("inputs/<int:pk>/download/", inputs.download, name="input-download"),
     path("", chat.page, name="chat"),
     path("chat/<int:conversation_id>/", chat.page, name="chat-history"),
     path("chat/send/", chat.send, name="chat-send"),

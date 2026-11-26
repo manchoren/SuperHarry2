@@ -44,6 +44,7 @@
             {% if occurrence.failure_reason %}<p>Scheduled task failed: {{ occurrence.failure_reason }}</p>{% endif %}
           {% endfor %}
           <p>{{ message.content }}</p>
+          {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a></p>{% endfor %}
           {% for run in message.skill_runs.all %}
             <p><a href="{% url 'skill-run-detail' run.job_id %}">View {{ run.skill_name }} result</a></p>
           {% endfor %}
@@ -91,9 +92,9 @@
       <datalist id="available-skills">
         {% for item in available_skills %}<option value="{{ item.name }}">{{ item.purpose }}</option>{% endfor %}
       </datalist>
-      <label for="attachment">Attach a CSV file</label>
-      <input id="attachment" type="file" name="attachment" accept=".csv,text/csv">
-      <small>To summarize it, ask “Summarize my CSV” in your message.</small>
+      <label for="attachment">Attach files</label>
+      <input id="attachment" type="file" name="attachment" multiple>
+      <small>Files are saved with this conversation. Processing depends on available skills; currently CSV summaries are supported when explicitly requested.</small>
       <small>Use <code>/summarize</code> followed by text to summarize it.</small>
       <button type="submit">Send</button>
     </form>

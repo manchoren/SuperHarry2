@@ -19,6 +19,30 @@ from superharry.soul import guidance
 
 
 class ChatTests(TestCase):
+    def test_multiple_attachments_are_private_and_removed_with_conversation(self):
+        from superharry.models import ChatInput, Conversation
+        files = [SimpleUploadedFile('table.csv', b'a,b\n1,2\n'), SimpleUploadedFile('report.pdf', b'%PDF synthetic')]
+        response = self.client.post('/chat/send/', {'message': 'Save these', 'attachment': files})
+        list(response.streaming_content)
+        conversation = Conversation.objects.get(pk=response['X-Conversation-Id'])
+        items = list(ChatInput.objects.filter(message__conversation=conversation).order_by('pk'))
+        self.assertEqual([item.name for item in items], ['table.csv', 'report.pdf'])
+        self.assertContains(self.client.get(response['Location']), 'Download report.pdf')
+        self.assertEqual(self.client.get(f'/inputs/{items[1].pk}/download/').content, b'%PDF synthetic')
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username='attachment-other'))
+        self.assertEqual(other.get(f'/inputs/{items[1].pk}/download/').status_code, 404)
+        conversation.delete()
+        self.assertFalse(ChatInput.objects.filter(pk__in=[item.pk for item in items]).exists())
+
+    def test_attachment_limits_reject_without_saving(self):
+        from superharry.models import ChatInput
+        with self.settings(CHAT_ATTACHMENT_MAX_COUNT=1, CHAT_ATTACHMENT_MAX_BYTES=3):
+            files = [SimpleUploadedFile('a.txt', b'a'), SimpleUploadedFile('b.txt', b'b')]
+            self.assertEqual(self.client.post('/chat/send/', {'message': 'test', 'attachment': files}).status_code, 400)
+            self.assertEqual(self.client.post('/chat/send/', {'message': 'test', 'attachment': SimpleUploadedFile('large.txt', b'1234')}).status_code, 400)
+        self.assertFalse(ChatInput.objects.exists())
+
     def test_selected_skill_is_sent_with_the_message(self):
         page = self.client.get('/')
         self.assertContains(page, 'value="summarize"')

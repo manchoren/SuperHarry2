@@ -121,7 +121,7 @@ class CsvSummary(models.Model):
 
 class ChatInput(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    message = models.ForeignKey("Message", null=True, blank=True, on_delete=models.SET_NULL, related_name="attachments")
+    message = models.ForeignKey("Message", null=True, blank=True, on_delete=models.CASCADE, related_name="attachments")
     name = models.CharField(max_length=255)
     media_type = models.CharField(max_length=32)
     payload = models.BinaryField()

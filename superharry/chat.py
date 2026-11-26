@@ -657,25 +657,32 @@ def send(request, conversation_id=None):
     selected_skill = next((item for item in available_chat_skills() if item["name"] == selected_name), None) if selected_name else None
     if selected_name and not selected_skill:
         return JsonResponse({"error": "The selected skill is unavailable."}, status=400)
-    attachment = request.FILES.get("attachment")
-    attachment_data = None
-    if attachment:
-        if not attachment.name.lower().endswith(".csv") or attachment.size > 256 * 1024:
-            return JsonResponse({"error": "Choose a CSV file up to 256 KiB."}, status=400)
-        payload = attachment.read(256 * 1024 + 1)
-        try:
-            payload.decode("utf-8")
-        except UnicodeDecodeError:
-            return JsonResponse({"error": "Choose a UTF-8 CSV file."}, status=400)
-        attachment_data = (attachment.name[:255], payload)
+    attachments = request.FILES.getlist("attachment")
+    if len(attachments) > settings.CHAT_ATTACHMENT_MAX_COUNT:
+        return JsonResponse({"error": "Too many attachments."}, status=400)
+    attachment_data = []
+    for attachment in attachments:
+        if attachment.size > settings.CHAT_ATTACHMENT_MAX_BYTES:
+            return JsonResponse({"error": "An attachment exceeds the size limit."}, status=400)
+        payload = attachment.read(settings.CHAT_ATTACHMENT_MAX_BYTES + 1)
+        if len(payload) > settings.CHAT_ATTACHMENT_MAX_BYTES:
+            return JsonResponse({"error": "An attachment exceeds the size limit."}, status=400)
+        media = "application/octet-stream"
+        if attachment.name.lower().endswith(".csv"):
+            try:
+                payload.decode("utf-8")
+                media = "text/plain"
+            except UnicodeDecodeError:
+                pass
+        attachment_data.append((attachment.name[:255], payload, media))
     memory_enabled = conversation is None and request.POST.get("memory_enabled") == "on"
     def create_reply():
         target = conversation or conversations.create(
             owner=request.user, title=text[:100], memory_enabled=memory_enabled
         )
         prompt = target.messages.create(role=Message.Role.USER, content=text, selected_skill=selected_name)
-        if attachment_data:
-            ChatInput.objects.create(owner=request.user, message=prompt, name=attachment_data[0], media_type="text/plain", payload=attachment_data[1])
+        for name, payload, media in attachment_data:
+            ChatInput.objects.create(owner=request.user, message=prompt, name=name, media_type=media, payload=payload)
         return target.messages.create(
             prompt=prompt, role=Message.Role.ASSISTANT, complete=False, in_progress=True
         )
@@ -684,7 +691,7 @@ def send(request, conversation_id=None):
     if selected_skill:
         identity += ("selected_skill", selected_name)
     if attachment_data:
-        identity += (attachment_data[0], sha256(attachment_data[1]).hexdigest())
+        identity += (tuple((name, sha256(payload).hexdigest()) for name, payload, _ in attachment_data),)
     if memory_enabled:
         identity += (True,)
     return start_submission(request, identity, create_reply, text, selected_skill)
