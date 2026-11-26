@@ -84,6 +84,7 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.wait_for_function("document.querySelector('#preview-image').naturalWidth === 32")
             page.get_by_role("button", name="Close preview").click()
             page.locator('summary[aria-label="Attach files"]').click()
+            assert page.get_by_text("Image understanding and image generation require a separate compatible capability.", exact=False).is_visible()
             page.locator('input[type="file"]').first.set_input_files([
                 {"name": "local.pdf", "mimeType": "application/pdf", "buffer": document.getvalue()},
                 {"name": "local.csv", "mimeType": "text/csv", "buffer": b"a,b\n1,2"},
