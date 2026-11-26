@@ -1,0 +1,8 @@
+{% extends 'memories/base.html' %}
+{% block title %}File access audit{% endblock %}
+{% block content %}
+<h1>Administrative file access audit</h1>
+<p><a href="{% url 'file-history' %}">Back to file history</a></p>
+<ul>{% for entry in page %}<li>{{ entry.occurred_at }} — {{ entry.actor.username|default:"Deleted user" }} — {{ entry.action }} — {{ entry.file_kind }} #{{ entry.file_id }} {{ entry.file_name }} — owner {{ entry.owner.username|default:"Deleted user" }}</li>{% empty %}<li>No recorded access.</li>{% endfor %}</ul>
+<nav aria-label="Audit pages">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?page={{ page.next_page_number }}">Next</a>{% endif %}</nav>
+{% endblock %}

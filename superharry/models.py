@@ -112,6 +112,7 @@ class SkillArtifact(models.Model):
     name = models.CharField(max_length=255)
     payload = models.BinaryField()
     partial = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(default=timezone.now, null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("run", "name"), name="unique_skill_artifact_name")]
@@ -125,6 +126,16 @@ class ArtifactDelivery(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("run", "name"), name="unique_artifact_delivery_name")]
+
+
+class FileAccessAudit(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="file_audit_actions")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="file_audit_subjects")
+    action = models.CharField(max_length=16)
+    file_kind = models.CharField(max_length=16)
+    file_id = models.PositiveBigIntegerField()
+    file_name = models.CharField(max_length=255)
+    occurred_at = models.DateTimeField(default=timezone.now)
 
 
 class SkillOutbox(models.Model):
@@ -160,6 +171,7 @@ class ChatInput(models.Model):
     name = models.CharField(max_length=255)
     media_type = models.CharField(max_length=32)
     payload = models.BinaryField()
+    created_at = models.DateTimeField(default=timezone.now, null=True, blank=True)
 
 
 class Message(models.Model):
@@ -189,6 +201,11 @@ class Message(models.Model):
                 name="one_active_or_complete_reply_per_prompt",
             ),
         ]
+
+
+class RemovedChatInput(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="removed_attachments")
+    name = models.CharField(max_length=255)
 
 
 class ChatSubmission(models.Model):

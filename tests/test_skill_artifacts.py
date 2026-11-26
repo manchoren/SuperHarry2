@@ -107,12 +107,14 @@ class SkillArtifactTests(TransactionTestCase):
         second.refresh_from_db()
         self.assertEqual(original.group_id, second.group_id)
         deletion = f'/chat/{self.conversation.pk}/groups/{original.group_id}/delete/'
-        self.assertContains(self.client.get(deletion), '2 files')
+        confirmation = self.client.get(deletion, follow=True)
+        self.assertContains(confirmation, '2 files')
+        token = confirmation.context['token']
         other = Client()
         other.force_login(get_user_model().objects.create_user(username='group-other'))
-        self.assertEqual(other.post(deletion, {'confirm': '1'}).status_code, 404)
+        self.assertEqual(other.get(deletion).status_code, 404)
         self.assertEqual(other.post(f'/chat/{self.conversation.pk}/files/{second.pk}/move/', {'group': 'new'}).status_code, 404)
-        self.client.post(deletion, {'confirm': '1'})
+        self.client.post('/files/delete/', {'token': token})
         self.assertEqual(self.client.get(original_url).status_code, 404)
         self.assertTrue(self.client.get(f'/skill-runs/{self.run.job_id}/artifacts/').json()['artifacts'][0]['removed'])
         self.assertFalse(SkillArtifact.objects.exists())

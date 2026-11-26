@@ -1,0 +1,9 @@
+{% extends 'memories/base.html' %}
+{% block title %}Confirm file deletion{% endblock %}
+{% block content %}
+<h1>Delete {{ count }} file{{ count|pluralize }}?</h1>
+<p>Owner: {{ owner.username }}. Related generated versions are included. Earlier message links will show that deleted files are unavailable.</p>
+<ul>{% for item in inputs %}<li>{{ item.name }} (uploaded)</li>{% endfor %}{% for item in artifacts %}<li>{{ item.name }} (generated)</li>{% endfor %}</ul>
+<form method="post">{% csrf_token %}<input type="hidden" name="token" value="{{ token }}"><button type="submit"{% if not count %} disabled{% endif %}>Confirm deletion</button></form>
+<p><a href="{% url 'file-history' %}">Cancel</a></p>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends 'memories/base.html' %}
+{% block title %}File history{% endblock %}
+{% block content %}
+<h1>File history</h1>
+<p>Uploaded and generated files remain available until you delete them or their conversation.</p>
+{% if is_admin %}
+<form method="get">
+  <label for="owner">User</label>
+  <select id="owner" name="owner"><option value="">All users</option>{% for user in users %}<option value="{{ user.pk }}"{% if selected_owner.pk == user.pk %} selected{% endif %}>{{ user.username }}</option>{% endfor %}</select>
+  <button type="submit">Show files</button>
+</form>
+<p><a href="{% url 'file-audit' %}">Administrative file access audit</a></p>
+{% endif %}
+<form action="{% url 'file-delete' %}" method="get">
+  {% if is_admin and selected_owner %}<input type="hidden" name="owner" value="{{ selected_owner.pk }}">{% endif %}
+  <label for="period">Delete files from</label>
+  <select id="period" name="period"><option value="hour">Last hour</option><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option><option value="all">All time</option></select>
+  <button type="submit"{% if is_admin and not selected_owner %} disabled{% endif %}>Review deletion</button>
+  {% if is_admin and not selected_owner %}<small>Select a user before deleting by period.</small>{% endif %}
+</form>
+<p><small>Some older files have no recorded date and are included only when deleting all time. Deleting a generated file also deletes every file in its version group.</small></p>
+<ul class="file-history-list">
+{% for item in page %}
+  <li><strong>{{ item.name }}</strong> — {% if item.kind == 'input' %}Uploaded{% else %}Generated{% endif %}
+    {% if is_admin %} — {{ item.owner.username }}{% endif %}
+    {% if item.conversation %} — {{ item.conversation.title }}{% else %} — Chat inputs or standalone skill{% endif %}
+    — {% if item.date %}{{ item.date }}{% else %}Date unavailable{% endif %}
+    <a href="{% url 'file-history-download' item.kind item.id %}">Download {{ item.name }}</a>
+    <a href="{% url 'file-delete' %}?kind={{ item.kind }}&amp;id={{ item.id }}">Delete {{ item.name }}</a>
+  </li>
+{% empty %}<li>No files found.</li>{% endfor %}
+</ul>
+<nav aria-label="File history pages">
+  {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}{% if is_admin and selected_owner %}&amp;owner={{ selected_owner.pk }}{% endif %}">Previous</a>{% endif %}
+  <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a href="?page={{ page.next_page_number }}{% if is_admin and selected_owner %}&amp;owner={{ selected_owner.pk }}{% endif %}">Next</a>{% endif %}
+</nav>
+{% endblock %}

@@ -25,6 +25,7 @@ from .models import SkillArtifact, SkillOutbox, SkillPreparation, SkillRun, VmSk
 from .skill_files import validate_skill_files
 from .skill_jobs import dispatch_lifecycle, dispatch_one, encode_job, pending_network_requests, result, run_result, skill_fingerprint, spool
 from .csv_protocol import read_limited
+from .file_history import audit_entries
 
 
 def retry_when_database_busy(view):
@@ -348,6 +349,7 @@ def artifact_status(request, job_id):
 @require_safe
 def artifact_download(request, pk):
     artifact = get_object_or_404(SkillArtifact, pk=pk, run__owner=request.user)
+    audit_entries(request.user, "download", artifacts=[artifact])
     return HttpResponse(bytes(artifact.payload), content_type="application/octet-stream", headers={
         "Content-Disposition": content_disposition_header(True, artifact.name),
         "X-Content-Type-Options": "nosniff",

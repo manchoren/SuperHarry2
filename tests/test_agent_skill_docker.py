@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,69 @@ from django.test import TransactionTestCase, override_settings
 @skipUnless(os.environ.get("SKILL_NETWORK_DOCKER_SMOKE") == "1", "Requires isolated Docker test image")
 class AgentSkillDockerTests(TransactionTestCase):
     serialized_rollback = True
+
+    def test_deletion_during_sandbox_does_not_restore_unchanged_file(self):
+        from scripts.run_skill_jobs import process_queue, validate_runtime
+        from superharry.models import ArtifactDelivery, ArtifactGroup, Conversation, Message, SkillArtifact, SkillRun
+
+        selected_id = []
+        calls = []
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                calls.append(1)
+                if len(calls) == 1:
+                    args = {'name': 'delete-probe', 'input': 'Process report.txt', 'artifact_ids': [selected_id[0]]}
+                    event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'run', 'function': {'name': 'invoke_skill', 'arguments': json.dumps(args)}}]}}]}
+                else:
+                    event = {'choices': [{'delta': {'content': 'Queued.'}}]}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n')
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Gateway)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        owner = get_user_model().objects.create_user(username='delete-docker-owner')
+        self.client.force_login(owner)
+        conversation = Conversation.objects.create(owner=owner, title='Delete test')
+        reply = Message.objects.create(conversation=conversation, role='assistant', content='Prior')
+        old = SkillRun.objects.create(owner=owner, reply=reply, skill_name='old', repository_skill=True, artifacts_imported=True)
+        group = ArtifactGroup.objects.create(owner=owner, conversation=conversation, name='report.txt')
+        artifact = SkillArtifact.objects.create(run=old, group=group, name='report.txt', payload=b'original')
+        ArtifactDelivery.objects.create(run=old, artifact=artifact, name='report.txt')
+        selected_id.append(artifact.pk)
+        code = "import json, os, time; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); time.sleep(3); o=Path(os.environ['SKILL_OUTPUT_DIR']); (o/'report.txt').write_bytes(p.read_bytes()); (o/'derived.txt').write_text('new result')"
+        with TemporaryDirectory() as directory, override_settings(SKILL_SPOOL=directory, OMNIROUTE_URL=f'http://127.0.0.1:{server.server_port}', OMNIROUTE_API_KEY='synthetic', CHAT_MODEL='test/model'):
+            self.client.post('/skills/new/', {'name': 'delete-probe', 'purpose': 'Process', 'instructions': 'Process file', 'files': json.dumps({'main.py': code}), 'dependencies': '[]'})
+            self.client.post('/skills/delete-probe/prepare/', {'entrypoint': 'main.py'})
+            image = os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local')
+            process_queue(Path(directory), runtime_check=validate_runtime, image=image)
+            response = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Process report.txt'})
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=owner, skill_name='delete-probe')
+            worker = threading.Thread(target=process_queue, args=(Path(directory),), kwargs={'runtime_check': validate_runtime, 'image': image})
+            worker.start()
+            deadline = time.monotonic() + 10
+            while not (Path(directory) / f'{run.job_id}.skill-running').exists() and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertTrue((Path(directory) / f'{run.job_id}.skill-running').exists())
+            confirmation = self.client.get(f'/files/delete/?kind=artifact&id={artifact.pk}')
+            self.assertEqual(self.client.post('/files/delete/', {'token': confirmation.context['token']}).status_code, 302)
+            worker.join(timeout=30)
+            self.assertFalse(worker.is_alive())
+            result = self.client.get(f'/skill-runs/{run.job_id}/artifacts/').json()['artifacts']
+            self.assertEqual([item['name'] for item in result], ['derived.txt'])
+            self.assertFalse(SkillArtifact.objects.filter(name='report.txt').exists())
+            self.assertEqual(self.client.get(result[0]['url']).content, b'new result')
+            self.assertTrue(ArtifactDelivery.objects.filter(run=old, artifact__isnull=True).exists())
 
     def test_agent_passes_only_selected_conversation_file_to_real_sandbox(self):
         from scripts.run_skill_jobs import process_queue, validate_runtime

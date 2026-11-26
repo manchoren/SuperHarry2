@@ -2,8 +2,9 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .models import ArtifactGroup, Conversation, SkillArtifact
 
@@ -41,15 +42,11 @@ def move_artifact(request, conversation_id, artifact_id):
 
 @never_cache
 @login_required
-@require_http_methods(['GET', 'POST'])
+@require_GET
 def delete_group(request, conversation_id, group_id):
     conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
     group = get_object_or_404(ArtifactGroup, pk=group_id, owner=request.user, conversation=conversation)
-    if request.method == 'POST':
-        if request.POST.get('confirm') != '1':
-            return HttpResponse('Confirm deletion.', status=400)
-        with transaction.atomic():
-            group.artifacts.all().delete()
-            group.delete()
+    first = group.artifacts.order_by('pk').first()
+    if first is None:
         return redirect('conversation-files', conversation_id=conversation.pk)
-    return render(request, 'artifact_group_delete.html', {'conversation': conversation, 'group': group})
+    return redirect(f"{reverse('file-delete')}?kind=artifact&id={first.pk}")

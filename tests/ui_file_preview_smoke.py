@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
     import django
     django.setup()
     from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Group
     from django.conf import settings
     from django.contrib.staticfiles.handlers import StaticFilesHandler
     from django.core.management import call_command
@@ -32,6 +33,8 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
     gateway = patch("superharry.chat.stream_reply", side_effect=lambda *args, **kwargs: (text for text in ["saved"]))
     gateway.start()
     user = get_user_model().objects.create_user(username="preview-user", password="synthetic-password-32")
+    admin = get_user_model().objects.create_user(username="history-admin", password="synthetic-admin-password-32")
+    admin.groups.add(Group.objects.get_or_create(name="Administrators")[0])
     conversation = Conversation.objects.create(owner=user, title="Preview test")
     message = Message.objects.create(conversation=conversation, role="user", content="Files")
     document = BytesIO()
@@ -101,10 +104,27 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_label("Group for generated_ver2.pdf").select_option(index=0)
             page.get_by_label("Group for generated_ver2.pdf").locator("..").get_by_role("button", name="Move").click()
             page.get_by_role("link", name="Delete all versions in generated.pdf").click()
-            page.get_by_role("button", name="Delete all versions").click()
-            assert page.get_by_text("No generated files yet.").is_visible()
-            page.get_by_role("link", name="Back to Preview test").click()
+            page.get_by_role("button", name="Confirm deletion").click()
+            page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
             page.get_by_text("generated.pdf is no longer available").wait_for()
+            page.get_by_role("link", name="File history").click()
+            page.get_by_role("link", name="Delete local.csv").click()
+            assert page.get_by_role("heading", name="Delete 1 file?").is_visible()
+            page.get_by_role("button", name="Confirm deletion").click()
+            page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
+            assert page.get_by_text("local.csv is no longer available").is_visible()
+            page.get_by_role("button", name="Sign out").click()
+            page.get_by_label("Username:").fill("history-admin")
+            page.get_by_label("Password:").fill("synthetic-admin-password-32")
+            page.get_by_role("button", name="Sign in").click()
+            page.get_by_role("link", name="File history").click()
+            assert page.get_by_role("button", name="Review deletion").is_disabled()
+            page.get_by_label("User", exact=True).select_option(label="preview-user")
+            page.get_by_role("button", name="Show files").click()
+            assert page.get_by_role("button", name="Review deletion").is_enabled()
+            page.get_by_role("link", name="Download local.pdf").click()
+            page.get_by_role("link", name="Administrative file access audit").click()
+            assert page.get_by_text("download", exact=False).count() > 0
             browser.close()
         print("File preview browser smoke passed")
     finally:

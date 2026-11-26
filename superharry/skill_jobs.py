@@ -9,6 +9,7 @@ from uuid import UUID
 from django.conf import settings
 from django.db import DatabaseError, connection, transaction
 from django.db.models import F
+from django.utils import timezone
 
 from .csv_protocol import publish, read_limited
 from .models import ArtifactDelivery, ArtifactGroup, SkillArtifact, SkillOutbox, SkillPreparation, SkillRun
@@ -271,7 +272,8 @@ def import_artifacts(directory, run, outcome):
                             continue
                         artifact.payload = content
                         artifact.partial = partial
-                        artifact.save(update_fields=("payload", "partial"))
+                        artifact.updated_at = timezone.now()
+                        artifact.save(update_fields=("payload", "partial", "updated_at"))
                     else:
                         if current.reply_id:
                             label = artifact_group_label(name)

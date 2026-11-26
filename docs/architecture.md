@@ -10,7 +10,7 @@ Django owns accounts, conversations, messages, turn status, limits, and the acti
 
 Bootstrap one Django superuser for installation and recovery. Use built-in Django user administration and an administrator group with explicit permissions to manage regular accounts, routes, and limits. Reserve privilege grants and administrator membership changes for the superuser. Keep public registration closed.
 
-Regular users can sign in, see the active model, and use chat. Check ownership server-side for conversations, memories, uploaded files, and sandbox results, including history and download endpoints. Keep private chat content out of routine admin views.
+Regular users can sign in, see the active model, and use chat. Check ownership server-side for conversations, memories, uploaded files, and sandbox results, including history and download endpoints. Keep private chat content out of routine admin views. As an explicit owner-approved exception, administrators can view, download, and delete uploaded and generated files belonging to any user through file history; record the administrator, owner, file, action, and time without recording file contents. Period-based administrative deletion requires an explicitly selected user and a confirmation of the affected files.
 
 Provide global daily message and maximum response length limits with optional per-user overrides. Allow one active response per user initially. Count a turn when Django submits it to OmniRoute and count the same submission only once. Local validation rejections are free. Reset the counter at midnight in the configured deployment timezone, initially `America/Guayaquil`. Persist partial replies and mark interrupted turns incomplete. Offer an explicit retry.
 

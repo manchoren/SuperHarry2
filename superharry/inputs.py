@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils.http import content_disposition_header
 from django.shortcuts import get_object_or_404, redirect, render
@@ -6,6 +7,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .models import ChatInput
+from .file_history import audit_entries, delete_inputs
 
 
 @never_cache
@@ -13,6 +15,7 @@ from .models import ChatInput
 @require_GET
 def download(request, pk):
     item = get_object_or_404(ChatInput, pk=pk, owner=request.user, message__conversation__owner=request.user)
+    audit_entries(request.user, "download", [item])
     return HttpResponse(bytes(item.payload), content_type="application/octet-stream", headers={
         "Content-Disposition": content_disposition_header(True, item.name),
         "X-Content-Type-Options": "nosniff",
@@ -53,5 +56,7 @@ def manage(request):
 @require_POST
 def delete(request, pk):
     item = get_object_or_404(ChatInput, pk=pk, owner=request.user)
-    item.delete()
+    with transaction.atomic():
+        audit_entries(request.user, "delete", [item])
+        delete_inputs([item])
     return redirect("inputs")
