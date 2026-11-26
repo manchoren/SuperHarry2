@@ -44,6 +44,14 @@ def main():
     })
     assert result == {"status": "complete", "output": "HELLO\n"}, result
     result = run_skill({
+        "files": {"main.py": "import json, os; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); print(f[0]['name'], p.read_text(), len(list(p.parent.iterdir()))); p.write_text('changed')"},
+        "entrypoint": "main.py", "input": "", "requires_file_inputs": True,
+        "input_files": [{"id": 7, "name": "selected.txt", "data": base64.b64encode(b"original").decode()}],
+    })
+    assert result == {"status": "complete", "output": "selected.txt original 1\n"}, result
+    result = run_skill({"files": {"main.py": "print('unexpected')"}, "entrypoint": "main.py", "input": "", "requires_file_inputs": True})
+    assert result["status"] == "failed", result
+    result = run_skill({
         "files": {"main.py": "from demo_skill_dep import value; print(value())"},
         "entrypoint": "main.py", "input": "", "dependencies": ["demo-skill-dep==1.0"],
         "wheels": {"demo_skill_dep-1.0-py3-none-any.whl": fixture_wheel()},

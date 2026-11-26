@@ -19,6 +19,62 @@ from superharry.soul import guidance
 
 
 class ChatTests(TestCase):
+    def test_skill_receives_only_selected_conversation_files(self):
+        from superharry.models import ChatInput, Conversation, Message, SkillOutbox, SkillRun, VmSkill
+        skill = VmSkill.objects.create(owner=self.user, name='file-reader', purpose='Read files', instructions='Read selected files', files={'main.py': 'print(input())'})
+        conversation = Conversation.objects.create(owner=self.user, title='Files')
+        prompt = Message.objects.create(conversation=conversation, role='user', content='Files')
+        selected = ChatInput.objects.create(owner=self.user, message=prompt, name='chosen.txt', media_type='text/plain', payload=b'chosen secret')
+        ChatInput.objects.create(owner=self.user, message=prompt, name='other.txt', media_type='text/plain', payload=b'other secret')
+        event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'files', 'function': {'name': 'invoke_skill', 'arguments': json.dumps({'name': skill.name, 'input': 'Read chosen.txt', 'input_ids': [selected.pk]})}}]}}]}
+        self.gateway_responses.append((200, b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n'))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.client.post('/skills/file-reader/prepare/', {'entrypoint': 'main.py'})
+            skill.refresh_from_db()
+            (Path(directory) / f'{skill.preparation.job_id}.skill-result').write_text('{"status":"complete"}')
+            response = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Read chosen.txt'})
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name=skill.name)
+            payload = SkillOutbox.objects.get(execution=run).payload
+            self.assertEqual([item['name'] for item in payload['input_files']], ['chosen.txt'])
+            self.assertEqual(base64.b64decode(payload['input_files'][0]['data']), b'chosen secret')
+            self.assertNotIn('input_files', run.execution_payload)
+            self.assertNotIn('chosen secret', json.dumps(self.requests))
+            self.gateway_responses.append((200, b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n'))
+            ambiguous = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Read my file'})
+            output = ''.join(json.loads(chunk).get('text', '') for chunk in ambiguous.streaming_content)
+            self.assertIn('Which file should I use?', output)
+            self.assertEqual(SkillRun.objects.filter(owner=self.user, skill_name=skill.name).count(), 1)
+
+    def test_skill_cannot_select_file_from_another_conversation(self):
+        from superharry.models import ChatInput, Conversation, Message, SkillRun, VmSkill
+        skill = VmSkill.objects.create(owner=self.user, name='file-reader', purpose='Read files', instructions='Read', files={'main.py': 'print(input())'})
+        other = Conversation.objects.create(owner=self.user, title='Other')
+        prompt = Message.objects.create(conversation=other, role='user', content='Private')
+        attachment = ChatInput.objects.create(owner=self.user, message=prompt, name='private.txt', media_type='text/plain', payload=b'private')
+        event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'files', 'function': {'name': 'invoke_skill', 'arguments': json.dumps({'name': skill.name, 'input': 'Read', 'input_ids': [attachment.pk]})}}]}}]}
+        self.gateway_responses.append((200, b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n'))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.client.post('/skills/file-reader/prepare/', {'entrypoint': 'main.py'})
+            skill.refresh_from_db()
+            (Path(directory) / f'{skill.preparation.job_id}.skill-result').write_text('{"status":"complete"}')
+            response = self.client.post('/chat/send/', {'message': 'Read the file'})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.filter(skill=skill).exists())
+
+    def test_csv_skill_reuses_an_earlier_conversation_attachment(self):
+        from superharry.models import ChatInput, Conversation, Message, SkillRun
+        conversation = Conversation.objects.create(owner=self.user, title='CSV')
+        prompt = Message.objects.create(conversation=conversation, role='user', content='Earlier upload')
+        item = ChatInput.objects.create(owner=self.user, message=prompt, name='sales.csv', media_type='text/plain', payload=b'a\n1\n')
+        args = json.dumps({'name': 'csv-summary', 'input': str(item.pk)})
+        event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'csv', 'function': {'name': 'invoke_skill', 'arguments': args}}]}}]}
+        self.gateway_responses.append((200, b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n'))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Summarize sales.csv'})
+            list(response.streaming_content)
+            self.assertTrue(SkillRun.objects.filter(owner=self.user, skill_name='csv-summary').exists())
+
     def test_multiple_attachments_are_private_and_removed_with_conversation(self):
         from superharry.models import ChatInput, Conversation
         files = [SimpleUploadedFile('table.csv', b'a,b\n1,2\n'), SimpleUploadedFile('report.pdf', b'%PDF synthetic')]

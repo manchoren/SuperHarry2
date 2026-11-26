@@ -15,6 +15,57 @@ from django.test import TransactionTestCase, override_settings
 class AgentSkillDockerTests(TransactionTestCase):
     serialized_rollback = True
 
+    def test_agent_passes_only_selected_conversation_file_to_real_sandbox(self):
+        from scripts.run_skill_jobs import process_queue, validate_runtime
+        from superharry.models import ChatInput, Conversation, Message, SkillRun
+
+        selected_id = []
+        calls = []
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                calls.append(payload)
+                if len(calls) == 1:
+                    args = {'name': 'file-probe', 'input': 'Read chosen', 'input_ids': [selected_id[0]]}
+                    event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'run', 'function': {'name': 'invoke_skill', 'arguments': json.dumps(args)}}]}}]}
+                else:
+                    event = {'choices': [{'delta': {'content': 'Queued.'}}]}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n')
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Gateway)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        owner = get_user_model().objects.create_user(username='file-docker-owner')
+        self.client.force_login(owner)
+        conversation = Conversation.objects.create(owner=owner, title='Files')
+        prompt = Message.objects.create(conversation=conversation, role='user', content='Files')
+        chosen = ChatInput.objects.create(owner=owner, message=prompt, name='chosen.txt', media_type='text/plain', payload=b'original')
+        ChatInput.objects.create(owner=owner, message=prompt, name='other.txt', media_type='text/plain', payload=b'private-other')
+        selected_id.append(chosen.pk)
+        code = "import json, os; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); print(f[0]['name'], p.read_text(), len(list(p.parent.iterdir()))); p.write_text('modified')"
+        with TemporaryDirectory() as directory, override_settings(SKILL_SPOOL=directory, OMNIROUTE_URL=f'http://127.0.0.1:{server.server_port}', OMNIROUTE_API_KEY='synthetic', CHAT_MODEL='test/model'):
+            self.client.post('/skills/new/', {'name': 'file-probe', 'purpose': 'Read', 'instructions': 'Read selected', 'files': json.dumps({'main.py': code}), 'dependencies': '[]'})
+            self.client.post('/skills/file-probe/prepare/', {'entrypoint': 'main.py'})
+            process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local'))
+            response = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Read chosen.txt'})
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=owner, skill_name='file-probe')
+            process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local'))
+            self.assertContains(self.client.get(f'/skill-runs/{run.job_id}/'), 'chosen.txt original 1')
+            chosen.refresh_from_db()
+            self.assertEqual(bytes(chosen.payload), b'original')
+            self.assertFalse(list(Path(directory).glob('*.skill-running')))
+            self.assertNotIn('private-other', json.dumps(calls))
+
     def test_chat_csv_attachment_runs_in_docker_and_result_is_private(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from django.test import Client

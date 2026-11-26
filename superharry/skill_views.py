@@ -43,6 +43,7 @@ class SkillForm(forms.ModelForm):
         help_texts = {
             "files": 'JSON object mapping relative file names to text, e.g. {"main.py": "print(1)"}.',
             "dependencies": 'JSON array of Python package names or exact versions, e.g. ["reportlab==4.0.0"].',
+            "instructions": "Selected conversation files are listed in the SKILL_INPUT_MANIFEST environment variable as JSON objects with id, name, and sandbox path.",
         }
 
     def clean_name(self):
@@ -283,11 +284,18 @@ def run(request, name):
     except (OSError, ValueError):
         return HttpResponse("Prepared dependencies are unavailable; prepare this skill again.", status=409)
     payload = {**preparation.payload, "operation": "run", "input": input_text, "wheels": wheels}
+    selected_files = getattr(request, "skill_input_files", [])
+    if selected_files:
+        if len(selected_files) > 5 or sum(len(item.payload) for item in selected_files) > 4 * 1024 * 1024:
+            return HttpResponse("Selected files exceed the skill input limit.", status=400)
+        payload["input_files"] = [{"id": item.pk, "name": item.name, "data": base64.b64encode(bytes(item.payload)).decode("ascii")} for item in selected_files]
+        payload["requires_file_inputs"] = True
     identifier = uuid4()
     try:
         encode_job(payload)
         with transaction.atomic():
-            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier, execution_payload=payload)
+            retained_payload = {key: value for key, value in payload.items() if key != "input_files"}
+            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier, execution_payload=retained_payload)
             SkillOutbox.objects.create(job_id=identifier, payload=payload, execution=execution, requested_by=request.user)
             transaction.on_commit(lambda: dispatch_one(identifier))
     except ValueError:

@@ -172,6 +172,27 @@ def main():
                     proxy.shutdown()
                     proxy.server_close()
         root = Path("/work")
+        selected_files = request.get("input_files", [])
+        if not isinstance(selected_files, list) or len(selected_files) > 5 or (request.get("requires_file_inputs") and not selected_files):
+            raise ValueError("Invalid selected files")
+        if selected_files and any(name == "inputs" or name.startswith("inputs/") for name in files):
+            raise ValueError("The inputs directory is reserved")
+        manifest = []
+        total = 0
+        for item in selected_files:
+            if not isinstance(item, dict) or set(item) != {"id", "name", "data"} or type(item["id"]) is not int or item["id"] <= 0 or not isinstance(item["name"], str) or len(item["name"]) > 255 or not isinstance(item["data"], str):
+                raise ValueError("Invalid selected file")
+            if any(existing["id"] == item["id"] for existing in manifest):
+                raise ValueError("Duplicate selected file")
+            contents = base64.b64decode(item["data"], validate=True)
+            total += len(contents)
+            if total > 4 * 1024 * 1024:
+                raise ValueError("Selected files are too large")
+            target = root / "inputs" / str(item["id"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(contents)
+            manifest.append({"id": item["id"], "name": item["name"], "path": str(target)})
+        environment["SKILL_INPUT_MANIFEST"] = json.dumps(manifest, ensure_ascii=True)
         reason = "file_preparation_failed"
         for name, content in files.items():
             target = root / name
