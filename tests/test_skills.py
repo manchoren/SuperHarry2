@@ -230,6 +230,13 @@ class SkillCatalogTests(TransactionTestCase):
         self.assertContains(response, "read-only")
         self.assertEqual(self.client.post("/skills/repository/summarize/").status_code, 405)
 
+    def test_csv_repository_skill_uses_skill_md_and_reserves_its_name(self):
+        self.client.force_login(get_user_model().objects.create_user(username="skill-reader"))
+        self.assertContains(self.client.get("/skills/repository/csv-summary/"), "name: csv-summary")
+        self.assertContains(self.client.get("/skills/"), "csv-summary")
+        response = self.client.post("/skills/new/", {"name": "csv-summary", "purpose": "Duplicate", "instructions": "Duplicate"})
+        self.assertContains(response, "This name belongs to a repository skill.")
+
     def test_repository_skill_is_discovered_after_adding_its_definition(self):
         self.client.force_login(get_user_model().objects.create_user(username="reader"))
         with TemporaryDirectory() as directory, patch("superharry.skill_views.SKILLS_DIRECTORY", Path(directory)):

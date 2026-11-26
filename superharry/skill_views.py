@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import re
-import tomllib
 from functools import wraps
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -18,7 +17,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST, require_safe
 
-from .text_skills import SKILLS_DIRECTORY
+from .text_skills import SKILLS_DIRECTORY, parse_definition, repository_definitions, repository_path
 from .models import SkillOutbox, SkillPreparation, SkillRun, VmSkill
 from .skill_files import validate_skill_files
 from .skill_jobs import dispatch_lifecycle, dispatch_one, encode_job, pending_network_requests, result, run_result, skill_fingerprint, spool
@@ -48,7 +47,7 @@ class SkillForm(forms.ModelForm):
 
     def clean_name(self):
         name = self.cleaned_data["name"]
-        if (SKILLS_DIRECTORY / f"{name}.md").exists():
+        if repository_path(SKILLS_DIRECTORY, name).exists():
             raise forms.ValidationError("This name belongs to a repository skill.")
         return name
 
@@ -73,7 +72,7 @@ class SkillForm(forms.ModelForm):
 
 
 def preparation_status(skill):
-    if (SKILLS_DIRECTORY / f"{skill.name}.md").exists():
+    if repository_path(SKILLS_DIRECTORY, skill.name).exists():
         return "Name conflict"
     preparation = getattr(skill, "preparation", None)
     if not preparation or preparation.fingerprint != skill_fingerprint(skill):
@@ -114,21 +113,14 @@ def preparation_status(skill):
 @login_required
 def catalog(request):
     skills = []
-    repository_paths = sorted(SKILLS_DIRECTORY.glob("*.md"))
-    repository_names = {path.stem for path in repository_paths}
-    for path in repository_paths:
+    repository_paths = repository_definitions(SKILLS_DIRECTORY)
+    repository_names = set(repository_paths)
+    for name, path in repository_paths.items():
         try:
-            prefix, metadata, instructions = path.read_text(encoding="utf-8").split("+++", 2)
-            manifest = tomllib.loads(metadata)
-            purpose = manifest["purpose"]
-            if (
-                prefix.strip() or not isinstance(purpose, str)
-                or not purpose.strip() or not instructions.strip()
-            ):
-                continue
+            definition = parse_definition(path)
         except (OSError, UnicodeError, ValueError, KeyError):
             continue
-        skills.append({"name": path.stem, "purpose": purpose, "origin": "Repository"})
+        skills.append({"name": name, "purpose": definition["purpose"], "origin": "Repository"})
     is_admin = request.user.is_superuser or request.user.groups.filter(name="Administrators").exists()
     skills.extend({"name": skill.name, "purpose": skill.purpose, "origin": "VM", "is_vm": True,
                    "status": preparation_status(skill), "editable": is_admin or skill.owner_id == request.user.pk}
@@ -213,7 +205,7 @@ def detail(request, name):
 @require_POST
 def prepare(request, name):
     skill = get_object_or_404(manageable_skills(request.user), name=name)
-    if (SKILLS_DIRECTORY / f"{skill.name}.md").exists():
+    if repository_path(SKILLS_DIRECTORY, skill.name).exists():
         return HttpResponse("Resolve the skill name conflict before preparation.", status=409)
     directory = spool()
     if directory is None:
@@ -269,7 +261,7 @@ def run(request, name):
     directory = spool()
     if directory is None:
         return HttpResponse("Skill execution is not configured.", status=503)
-    if (SKILLS_DIRECTORY / f"{skill.name}.md").exists():
+    if repository_path(SKILLS_DIRECTORY, skill.name).exists():
         return HttpResponse("Resolve the skill name conflict before execution.", status=409)
     preparation = SkillPreparation.objects.filter(skill=skill).first()
     if not preparation or preparation.fingerprint != skill_fingerprint(skill):
@@ -375,7 +367,7 @@ def running_is_current(directory, job):
 @require_safe
 def repository_detail(request, name):
     try:
-        definition = (SKILLS_DIRECTORY / f"{name}.md").read_text(encoding="utf-8")
+        definition = repository_path(SKILLS_DIRECTORY, name).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         raise Http404 from None
     return render(request, "skills/repository_detail.html", {"name": name, "definition": definition})

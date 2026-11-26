@@ -33,19 +33,16 @@ from .text_skills import text_skill
 def available_chat_skills():
     from .models import VmSkill
     from .skill_views import SKILLS_DIRECTORY, preparation_status
-    import tomllib
+    from .text_skills import parse_definition, repository_definitions
 
     names = set(VmSkill.objects.values_list("name", flat=True))
     available = []
-    for path in sorted(SKILLS_DIRECTORY.glob("*.md")):
+    for name, path in repository_definitions(SKILLS_DIRECTORY).items():
         try:
-            prefix, metadata, instructions = path.read_text(encoding="utf-8").split("+++", 2)
-            manifest = tomllib.loads(metadata)
-            allowed = manifest.get("allowed_tools")
-            if (not prefix.strip() and instructions.strip() and path.stem not in names
-                    and (allowed == [] or (path.stem == "csv-summary" and allowed == ["isolated-python"]))
-                    and isinstance(manifest.get("purpose"), str) and manifest["purpose"].strip()):
-                available.append({"name": path.stem, "purpose": manifest["purpose"], "origin": "repository"})
+            definition = parse_definition(path)
+            allowed = definition["allowed_tools"]
+            if name not in names and (allowed == [] or (name == "csv-summary" and allowed == ["isolated-python"])):
+                available.append({"name": name, "purpose": definition["purpose"], "origin": "repository"})
         except (OSError, UnicodeError, ValueError):
             continue
     for candidate in VmSkill.objects.select_related("preparation").order_by("name"):
