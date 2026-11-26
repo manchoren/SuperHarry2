@@ -8,6 +8,6 @@
 
 ## Complete and verify
 
-- Continue through the remaining authorized criteria after each passing slice. Stop at an explicit user request or a genuine blocker; report the exact unfinished criteria and the evidence needed to resolve them.
+- Before ending work, account for every acceptance criterion as satisfied with evidence, incomplete, or blocked. Continue all authorized work that can progress independently; a passing slice or an incomplete design is not a stopping condition. Stop only at an explicit user request or a genuine blocker, and report the unfinished criteria and evidence or input needed to resolve them.
 - Test user-visible behavior at the agreed boundaries and run the checks required by the ticket. For sandbox work, verify the real configured runtime and its limits using synthetic inputs and isolated state. A bypassed gate or simulated worker is diagnostic evidence, not isolation acceptance.
-- Before claiming completion or closing a ticket, account for each criterion and record the tested revision, commands, and results. Distinguish local tests, Docker integration, deployment, and production acceptance; identify anything still pending.
+- Before claiming completion or closing a ticket, record the tested revision, commands, and results for the criteria. Distinguish local tests, Docker integration, deployment, and production acceptance; identify anything still pending.
