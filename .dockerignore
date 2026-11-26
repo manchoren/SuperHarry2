@@ -1,5 +1,6 @@
 **
 !requirements.txt
+!SOUL.md
 !csv_worker.py
 !skill_worker.py
 !skill_network_client.py
