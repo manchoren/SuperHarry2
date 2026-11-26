@@ -1,5 +1,6 @@
 **
 !requirements.txt
+!requirements-skill.txt
 !SOUL.md
 !csv_worker.py
 !skill_worker.py

@@ -19,6 +19,15 @@ from superharry.soul import guidance
 
 
 class ChatTests(TestCase):
+    def test_same_named_files_with_overlapping_ids_require_qualified_identity(self):
+        from superharry.chat import AmbiguousFileSelection, require_unambiguous_file_choice
+        from superharry.models import ChatInput, SkillArtifact
+        uploaded = ChatInput(pk=1, name='same.pdf')
+        generated = SkillArtifact(pk=1, name='same.pdf')
+        with self.assertRaises(AmbiguousFileSelection):
+            require_unambiguous_file_choice('Use same.pdf #1', [generated], [uploaded, generated])
+        require_unambiguous_file_choice('Use artifact#1', [generated], [uploaded, generated])
+
     def test_skill_receives_only_selected_conversation_files(self):
         from superharry.models import ChatInput, Conversation, Message, SkillOutbox, SkillRun, VmSkill
         skill = VmSkill.objects.create(owner=self.user, name='file-reader', purpose='Read files', instructions='Read selected files', files={'main.py': 'print(input())'})

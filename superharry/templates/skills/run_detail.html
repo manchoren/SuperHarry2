@@ -12,7 +12,7 @@
   {% elif outcome.reason == 'skill_changed_external' %}<p>Skill updated; execution stopped. External action was not repeated.</p>
   {% elif outcome.reason == 'skill_changed_uncertain' %}<p>Skill updated; execution stopped because prior external activity is unknown. The run was not automatically repeated.</p>
   {% elif outcome.reason == 'skill_changed_unavailable' %}<p>Skill updated; execution stopped because the original entrypoint is unavailable.</p>
-  {% else %}<p>Execution failed.</p>{% endif %}
+  {% else %}<p>Execution failed.{% if outcome.message %} {{ outcome.message }}{% endif %}</p>{% endif %}
   {% for delivery in job.artifact_deliveries.all %}<p>{% if delivery.artifact_id %}<a href="{% url 'skill-artifact-download' delivery.artifact_id %}">Download {{ delivery.name }}</a>{% else %}{{ delivery.name }} is no longer available{% endif %}{% if delivery.partial %} (partial result){% endif %}</p>{% endfor %}
   {% for action in network_requests %}
     <section>

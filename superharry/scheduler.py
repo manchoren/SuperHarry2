@@ -105,6 +105,8 @@ def recover_occurrences():
             continue
         success = outcome.get("status") == "complete"
         text = outcome.get("output", "") if success else "Skill execution failed or timed out."
+        if not success and isinstance(outcome.get("message"), str) and outcome["message"]:
+            text += " " + outcome["message"]
         if outcome.get("reason") == "skill_deleted":
             text = "Skill deleted; execution stopped."
         elif outcome.get("reason") == "skill_changed_external":

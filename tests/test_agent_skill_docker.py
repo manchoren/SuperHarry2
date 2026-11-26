@@ -16,6 +16,91 @@ from django.test import TransactionTestCase, override_settings
 class AgentSkillDockerTests(TransactionTestCase):
     serialized_rollback = True
 
+    def test_agent_creates_and_reads_repository_documents_in_real_sandbox(self):
+        from scripts.run_skill_jobs import process_queue, validate_runtime
+        from superharry.models import SkillArtifact, SkillRun
+
+        calls = []
+        invocation = [{'name': 'pdf', 'input': json.dumps({'operation': 'create', 'filename': 'report.pdf', 'text': 'Synthetic PDF content'})}]
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                calls.append(payload)
+                if len(calls) == 1:
+                    event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'pdf', 'function': {'name': 'invoke_skill', 'arguments': json.dumps(invocation[0])}}]}}]}
+                else:
+                    event = {'choices': [{'delta': {'content': 'Skill result received.'}}]}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n')
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Gateway)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        owner = get_user_model().objects.create_user(username='pdf-docker-owner')
+        self.client.force_login(owner)
+        with TemporaryDirectory() as directory, override_settings(SKILL_SPOOL=directory, OMNIROUTE_URL=f'http://127.0.0.1:{server.server_port}', OMNIROUTE_API_KEY='synthetic', CHAT_MODEL='test/model', SKILL_INTERACTIVE_WAIT_SECONDS=20):
+            stop = threading.Event()
+            errors = []
+
+            def pump():
+                try:
+                    while not stop.is_set():
+                        process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-docs-test:local'))
+                        stop.wait(.1)
+                except Exception as error:
+                    errors.append(str(error))
+
+            worker = threading.Thread(target=pump, daemon=True)
+            worker.start()
+            try:
+                cases = [
+                    ('pdf', 'report.pdf', {'operation': 'create', 'filename': 'report.pdf', 'text': 'Synthetic PDF content'}, b'%PDF'),
+                    ('docx', 'report.docx', {'operation': 'create', 'filename': 'report.docx', 'title': 'Synthetic', 'text': 'Synthetic document content'}, b'PK'),
+                    ('xlsx', 'report.xlsx', {'operation': 'create', 'filename': 'report.xlsx', 'sheets': [{'name': 'Data', 'rows': [['Synthetic', 3]]}]}, b'PK'),
+                ]
+                for name, filename, request, signature in cases:
+                    calls.clear()
+                    invocation[0] = {'name': name, 'input': json.dumps(request)}
+                    response = self.client.post('/chat/send/', {'message': f'Create {filename}'})
+                    output = ''.join(json.loads(chunk).get('text', '') for chunk in response.streaming_content)
+                    self.assertIn('Skill result received.', output)
+                    result = next(message['content'] for message in calls[-1]['messages'] if message.get('role') == 'tool')
+                    self.assertEqual(json.loads(result)['status'], 'complete')
+                    artifact = SkillArtifact.objects.get(name=filename)
+                    self.assertTrue(bytes(artifact.payload).startswith(signature))
+                    self.assertEqual(self.client.get(f'/skill-artifacts/{artifact.pk}/download/').content, bytes(artifact.payload))
+                    conversation_id = response['X-Conversation-Id']
+                    calls.clear()
+                    invocation[0] = {'name': name, 'input': json.dumps({'operation': 'read'}), 'artifact_ids': [artifact.pk]}
+                    response = self.client.post(f'/chat/{conversation_id}/send/', {'message': f'Read {filename}'})
+                    list(response.streaming_content)
+                    result = next(message['content'] for message in calls[-1]['messages'] if message.get('role') == 'tool')
+                    self.assertIn('Synthetic', json.loads(result)['output'])
+                    latest = SkillRun.objects.filter(owner=owner, skill_name=name).order_by('-pk').first()
+                    self.assertEqual(self.client.get(f'/skill-runs/{latest.job_id}/artifacts/').json()['artifacts'], [])
+                calls.clear()
+                invocation[0] = {'name': 'pdf', 'input': json.dumps({'operation': 'unsupported'})}
+                response = self.client.post('/chat/send/', {'message': 'Use an unsupported PDF operation'})
+                list(response.streaming_content)
+                result = next(message['content'] for message in calls[-1]['messages'] if message.get('role') == 'tool')
+                self.assertEqual(json.loads(result)['status'], 'failed')
+                self.assertIn('Unsupported PDF operation', json.loads(result)['message'])
+                latest = SkillRun.objects.filter(owner=owner, skill_name='pdf').order_by('-pk').first()
+                self.assertContains(self.client.get(f'/skill-runs/{latest.job_id}/'), 'Unsupported PDF operation')
+                self.assertFalse(errors)
+            finally:
+                stop.set()
+                worker.join(timeout=30)
+                self.assertFalse(worker.is_alive())
+
     def test_deletion_during_sandbox_does_not_restore_unchanged_file(self):
         from scripts.run_skill_jobs import process_queue, validate_runtime
         from superharry.models import ArtifactDelivery, ArtifactGroup, Conversation, Message, SkillArtifact, SkillRun

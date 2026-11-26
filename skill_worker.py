@@ -245,7 +245,19 @@ def main():
         )
         if len(completed.stdout) > MAX_OUTPUT:
             raise ValueError("Output too large")
-        result = {"status": "complete", "output": completed.stdout.decode("utf-8")}
+        output = completed.stdout.decode("utf-8")
+        if request.get("output_protocol", "text") == "structured":
+            structured = json.loads(output)
+            if not isinstance(structured, dict) or type(structured.get("ok")) is not bool or not isinstance(structured.get("message"), str):
+                raise ValueError("Invalid skill response")
+            if structured["ok"]:
+                result = {"status": "complete", "output": structured["message"]}
+            else:
+                result = {"status": "failed", "stage": "execution", "reason": "skill_reported_error", "message": structured["message"][:1000]}
+        elif request.get("output_protocol", "text") == "text":
+            result = {"status": "complete", "output": output}
+        else:
+            raise ValueError("Invalid output protocol")
     except subprocess.TimeoutExpired:
         result = {"status": "timeout", "stage": stage, "reason": "execution_timeout"}
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):

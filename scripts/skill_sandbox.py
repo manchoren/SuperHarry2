@@ -184,8 +184,10 @@ def _execute(command, payload, timeout, network_handler=None, package_handler=No
             return outcome
         if result.get("stage") in ("preparation", "execution"):
             failure = {"status": "failed", "stage": result["stage"]}
-            if result.get("reason") in ("invalid_request", "dependency_preparation_failed", "file_preparation_failed", "execution_failed", "output_limit_or_invalid"):
+            if result.get("reason") in ("invalid_request", "dependency_preparation_failed", "file_preparation_failed", "execution_failed", "output_limit_or_invalid", "skill_reported_error"):
                 failure["reason"] = result["reason"]
+            if result.get("reason") == "skill_reported_error" and isinstance(result.get("message"), str):
+                failure["message"] = result["message"][:1000]
             if captured_artifacts and artifact_handler is None:
                 failure["artifacts"] = captured_artifacts
             return failure

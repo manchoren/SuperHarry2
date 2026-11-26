@@ -8,6 +8,8 @@ RUN apt-get update \
     && install -d -o app -g app /data
 
 FROM python-base AS skill-worker
+COPY requirements-skill.txt /requirements-skill.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --only-binary=:all: -r /requirements-skill.txt
 COPY skill_worker.py /skill_worker.py
 COPY skill_network_client.py /skill_network_client.py
 COPY superharry/skill_files.py /skill_files.py

@@ -4,14 +4,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TransactionTestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 from superharry.models import Conversation, Message, SkillArtifact, SkillRun
 
 
-class SkillArtifactTests(TransactionTestCase):
-    serialized_rollback = True
-
+class SkillArtifactTests(TestCase):
     def setUp(self):
         self.owner = get_user_model().objects.create_user(username="artifact-owner")
         self.client.force_login(self.owner)
