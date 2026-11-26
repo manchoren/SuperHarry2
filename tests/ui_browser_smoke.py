@@ -80,6 +80,14 @@ server = make_server("127.0.0.1", 18765, StaticFilesHandler(get_wsgi_application
 threading.Thread(target=server.serve_forever, daemon=True).start()
 from playwright.sync_api import sync_playwright
 
+
+def choose_theme(page, mode):
+    slider = page.locator("[data-theme-select]")
+    if not slider.is_visible():
+        page.locator(".appearance-popover summary").click()
+    slider.evaluate("(element, value) => { element.value = value; element.dispatchEvent(new Event('input', {bubbles: true})); }", {"light": "0", "system": "1", "dark": "2"}[mode])
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(
         executable_path=os.environ["UI_BROWSER_PATH"], headless=True
@@ -93,19 +101,28 @@ with sync_playwright() as p:
     axe_script = os.environ["UI_AXE_PATH"]
     page.add_script_tag(path=axe_script)
     for mode in ["light", "dark"]:
-        page.locator("[data-theme-select]").select_option(mode)
+        choose_theme(page, mode)
         violations = page.evaluate(
             "async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => v.id)"
         )
         assert not violations, ("login", mode, violations)
     assert page.locator("html").get_attribute("data-theme") == "dark"
     page.reload()
-    assert page.locator("[data-theme-select]").input_value() == "dark"
+    assert page.locator("[data-theme-select]").input_value() == "2"
     page.locator("#id_username").fill("ui-test")
     page.locator("#id_password").fill("synthetic-password-32")
     page.get_by_role("button", name="Sign in").click()
     assert page.get_by_role("heading", name="New chat").is_visible()
+    if os.environ.get("UI_LAYOUT_SCREENSHOT"):
+        page.screenshot(path=os.environ["UI_LAYOUT_SCREENSHOT"], full_page=True)
     assert page.locator("html").get_attribute("data-theme") == "dark"
+    original_url = page.url
+    page.get_by_role("button", name="Search conversations (coming later)").click()
+    assert page.url == original_url
+    page.get_by_role("button", name="Hide conversations").click()
+    assert not page.locator("#site-sidebar").is_visible()
+    page.get_by_role("button", name="Toggle conversations").click()
+    assert page.locator("#site-sidebar").is_visible()
     for path in ["/inputs/", "/schedules/", "/memories/", "/skills/", "/csv/"]:
         page.goto("http://127.0.0.1:18765" + path)
         assert page.locator("main").is_visible(), path
@@ -161,21 +178,26 @@ with sync_playwright() as p:
     )
     page.get_by_role("button", name="Upload").click()
     assert page.get_by_text("synthetic.csv").is_visible()
-    page.locator("[data-theme-select]").select_option("system")
+    choose_theme(page, "system")
     assert page.locator("html").get_attribute("data-theme") == "light"
     page.emulate_media(color_scheme="dark")
     page.wait_for_function("document.documentElement.dataset.theme === 'dark'")
-    page.locator("[data-theme-select]").select_option("light")
+    choose_theme(page, "light")
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto("http://127.0.0.1:18765/")
     assert not page.locator("#site-sidebar").is_visible()
-    page.get_by_role("button", name="Menu").click()
+    page.get_by_role("button", name="Toggle conversations").click()
     assert page.locator("#site-sidebar").is_visible()
     assert (
-        page.get_by_role("button", name="Menu").get_attribute("aria-expanded") == "true"
+        page.get_by_role("button", name="Toggle conversations").get_attribute("aria-expanded") == "true"
     )
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    page.get_by_role("button", name="Menu").click()
+    page.get_by_role("button", name="Toggle conversations").click()
+    assert not page.locator("#site-sidebar").is_visible()
+    page.get_by_role("button", name="Toggle conversations").focus()
+    page.keyboard.press("Enter")
+    assert page.locator("#site-sidebar").is_visible()
+    page.keyboard.press("Escape")
     assert not page.locator("#site-sidebar").is_visible()
     page.keyboard.press("Tab")
     assert page.evaluate(
@@ -197,7 +219,7 @@ with sync_playwright() as p:
     ]:
         page.goto("http://127.0.0.1:18765" + path)
         for mode in ["light", "dark"]:
-            page.locator("[data-theme-select]").select_option(mode)
+            choose_theme(page, mode)
             page.add_script_tag(path=axe_script)
             results = page.evaluate(
                 "async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => ({id:v.id, nodes:v.nodes.length, impact:v.impact}))"

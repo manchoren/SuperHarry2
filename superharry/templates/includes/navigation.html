@@ -1,24 +1,32 @@
-<button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-sidebar">Menu</button>
-<aside id="site-sidebar" class="sidebar">
-  <a class="brand" href="{% url 'chat' %}"><span class="brand-mark" aria-hidden="true">S</span> SuperHarry</a>
-  <nav class="primary-nav" aria-label="Main navigation">
-    <a href="{% url 'chat' %}">New chat</a>
-    <a href="{% url 'inputs' %}">Chat inputs</a>
-    <a href="{% url 'schedules' %}">Schedules</a>
-    <a href="{% url 'memories' %}">Saved memories</a>
-    <a href="{% url 'skills' %}">Skills</a>
-    <a href="{% url 'account-settings' %}">Settings</a>
-    {% if has_previous_csv_results %}<a href="{% url 'csv-upload' %}">Previous CSV results</a>{% endif %}
+{% load static %}
+<aside class="icon-rail" aria-label="Application navigation">
+  <button class="rail-button menu-toggle" type="button" aria-label="Toggle conversations" aria-expanded="true" aria-controls="site-sidebar" title="Toggle conversations"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#bars"></use></svg></button>
+  <nav class="rail-nav" aria-label="Main navigation">
+    <a class="rail-button" href="{% url 'chat' %}" aria-label="Chat" title="Chat"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#house"></use></svg></a>
+    <a class="rail-button" href="{% url 'inputs' %}" aria-label="Chat inputs" title="Chat inputs"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg></a>
+    <a class="rail-button" href="{% url 'schedules' %}" aria-label="Schedules" title="Schedules"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#calendar-days"></use></svg></a>
+    <a class="rail-button" href="{% url 'memories' %}" aria-label="Saved memories" title="Saved memories"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#brain"></use></svg></a>
+    <a class="rail-button" href="{% url 'skills' %}" aria-label="Skills" title="Skills"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#puzzle-piece"></use></svg></a>
+    {% if has_previous_csv_results %}<a class="rail-button" href="{% url 'csv-upload' %}" aria-label="Previous CSV results" title="Previous CSV results"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#file-csv"></use></svg></a>{% endif %}
   </nav>
+  <div class="sidebar-footer">
+    <a class="rail-button" href="{% url 'account-settings' %}" aria-label="Settings" title="Settings"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#gear"></use></svg></a>
+    <details class="appearance-popover"><summary class="rail-button" aria-label="Appearance" title="Appearance"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#circle-half-stroke"></use></svg></summary><div class="appearance-panel">{% include 'includes/theme.html' %}</div></details>
+    <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="rail-button" type="submit" aria-label="Sign out" title="Sign out"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#right-from-bracket"></use></svg></button></form>
+    <a class="rail-button" href="{% url 'account-settings' %}" aria-label="Profile settings" title="Profile settings">{% include 'includes/avatar.html' %}</a>
+  </div>
+</aside>
+<aside id="site-sidebar" class="sidebar" aria-label="Conversation sidebar">
+  <header class="sidebar-header">
+    <a class="brand" href="{% url 'chat' %}">SuperHarry</a>
+    <button class="sidebar-icon" type="button" aria-label="Search conversations (coming later)" title="Search conversations"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#magnifying-glass"></use></svg></button>
+    <button class="sidebar-icon sidebar-close" type="button" aria-label="Hide conversations" title="Hide conversations"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#table-columns"></use></svg></button>
+  </header>
+  <a class="new-chat-link" href="{% url 'chat' %}"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#pen-to-square"></use></svg> New chat</a>
   {% if show_conversations %}
   <nav class="conversation-nav" aria-label="Conversations" data-status-url="{% url 'conversation-status' %}"{% if conversation %} data-active-id="{{ conversation.pk }}" data-seen-url="{% url 'conversation-seen' conversation.pk %}"{% endif %}>
     <h2>Conversations</h2>
     <ul>{% for item in conversations %}<li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }} <small class="conversation-state" data-conversation-id="{{ item.pk }}" aria-live="polite"></small></a></li>{% empty %}<li class="muted">No conversations yet</li>{% endfor %}</ul>
   </nav>
   {% endif %}
-  <div class="sidebar-footer">
-    <a href="{% url 'account-settings' %}" aria-label="Profile settings">{% include 'includes/avatar.html' %}</a>
-    {% include 'includes/theme.html' %}
-    <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="subtle-button" type="submit">Sign out</button></form>
-  </div>
 </aside>

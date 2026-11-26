@@ -6,4 +6,6 @@ PDF and image previews are local to the browser. PDF rendering disables PDF.js d
 
 Sources: [FilePond properties](https://pqina.nl/filepond/docs/api/instance/properties/) and [PDF.js examples](https://mozilla.github.io/pdf.js/examples/).
 
+The navigation uses a locally bundled subset of Font Awesome Free 7.3.1 SVG icons. The icon license is CC BY 4.0; its attribution and the distribution's license text are included in the vendor directory. Source: [Font Awesome Free](https://github.com/FortAwesome/Font-Awesome).
+
 Generated skill files are exported from the sandbox's `output` directory. `DJANGO_SKILL_OUTPUT_MAX_COUNT` defaults to 5 files and `DJANGO_SKILL_OUTPUT_MAX_BYTES` defaults to 2 MiB total per run. Operators can lower either value; the worker rejects settings above those hard limits. Output files are staged on the restricted skill spool before the container is removed, then imported into the application's database. Results from failed or timed-out executions are marked partial when their output could be recovered.

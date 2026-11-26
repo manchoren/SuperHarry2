@@ -16,7 +16,6 @@
   {% include 'includes/navigation.html' with show_conversations=True %}
   <main class="main-content chat-content">
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
-    <p>Model: {{ active_model|default:"Not configured" }}</p>
     {% for schedule in schedules %}
       <article>
         <strong>Scheduled task #{{ schedule.pk }}</strong>
@@ -36,6 +35,7 @@
       </article>
     {% endfor %}
     <section id="messages" aria-label="Messages">
+      {% if not conversation %}<p class="chat-welcome">What can we work on?</p>{% endif %}
       {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
@@ -89,18 +89,25 @@
           Include relevant saved memories in model requests
         </label>
       {% endif %}
-      <label for="message">Message</label>
-      <textarea id="message" name="message" rows="3" required></textarea>
-      <label for="selected-skill">Skill (optional)</label>
-      <input id="selected-skill" name="selected_skill" list="available-skills" autocomplete="off" placeholder="Search skills">
-      <datalist id="available-skills">
-        {% for item in available_skills %}<option value="{{ item.name }}">{{ item.purpose }}</option>{% endfor %}
-      </datalist>
-      <label for="attachment">Attach files</label>
-      <input id="attachment" type="file" name="attachment" multiple>
-      <small>Files are saved with this conversation. Processing depends on available skills; currently CSV summaries are supported when explicitly requested.</small>
-      <small>Use <code>/summarize</code> followed by text to summarize it.</small>
-      <button type="submit">Send</button>
+      <label class="visually-hidden" for="message">Message</label>
+      <textarea id="message" name="message" rows="3" placeholder="Ask SuperHarry" required></textarea>
+      <div class="composer-options">
+        <details class="composer-popover">
+          <summary aria-label="Attach files" title="Attach files"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#plus"></use></svg><span>Files</span></summary>
+          <div class="composer-panel"><label for="attachment">Attach files</label><input id="attachment" type="file" name="attachment" multiple>
+          <small>Files are saved with this conversation. Processing depends on available skills; currently CSV summaries are supported when explicitly requested.</small></div>
+        </details>
+        <details class="composer-popover">
+          <summary><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#puzzle-piece"></use></svg> Skills</summary>
+          <div class="composer-panel"><label for="selected-skill">Skill (optional)</label>
+          <input id="selected-skill" name="selected_skill" list="available-skills" autocomplete="off" placeholder="Search skills">
+          <datalist id="available-skills">{% for item in available_skills %}<option value="{{ item.name }}">{{ item.purpose }}</option>{% endfor %}</datalist>
+          <small>Use <code>/summarize</code> followed by text for a quick summary.</small></div>
+        </details>
+        <span id="selected-skill-label" class="selected-skill-label" aria-live="polite"></span>
+        <span class="composer-model" aria-label="Active model">{{ active_model|default:"Not configured" }}</span>
+        <button type="submit">Send</button>
+      </div>
     </form>
   </main>
   <aside id="file-preview" class="file-preview" aria-label="File preview" hidden>

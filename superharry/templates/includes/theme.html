@@ -1,7 +1,9 @@
-<label class="theme-control">Appearance
-  <select data-theme-select aria-label="Appearance">
-    <option value="system">System</option>
-    <option value="light">Light</option>
-    <option value="dark">Dark</option>
-  </select>
-</label>
+{% load static %}
+<div class="theme-control">
+  <label for="theme-slider">Appearance: <span data-theme-value>System</span></label>
+  <div class="theme-slider-row">
+    <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#sun"></use></svg>
+    <input id="theme-slider" data-theme-select type="range" min="0" max="2" step="1" value="1" aria-label="Appearance" aria-valuetext="System">
+    <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#moon"></use></svg>
+  </div>
+</div>

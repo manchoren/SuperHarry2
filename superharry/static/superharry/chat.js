@@ -3,6 +3,10 @@ const input = document.querySelector("#message");
 const statusMessage = document.querySelector("#chat-status");
 const historyLink = document.querySelector("#chat-history");
 const messages = document.querySelector("#messages");
+const selectedSkill = document.querySelector("#selected-skill");
+selectedSkill?.addEventListener("input", () => {
+  document.querySelector("#selected-skill-label").textContent = selectedSkill.value ? `Skill: ${selectedSkill.value}` : "";
+});
 
 function appendMessage(role, text) {
   const article = document.createElement("article");
