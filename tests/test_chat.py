@@ -75,6 +75,23 @@ class ChatTests(TestCase):
             list(response.streaming_content)
             self.assertTrue(SkillRun.objects.filter(owner=self.user, skill_name='csv-summary').exists())
 
+    def test_skill_cannot_select_generated_file_from_another_conversation(self):
+        from superharry.models import Conversation, Message, SkillArtifact, SkillRun, VmSkill
+        skill = VmSkill.objects.create(owner=self.user, name='file-reader', purpose='Read', instructions='Read', files={'main.py': 'print(input())'})
+        other = Conversation.objects.create(owner=self.user, title='Other')
+        reply = Message.objects.create(conversation=other, role='assistant', content='Private')
+        prior = SkillRun.objects.create(owner=self.user, reply=reply, skill_name='old', repository_skill=True)
+        artifact = SkillArtifact.objects.create(run=prior, name='private.txt', payload=b'private')
+        event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'file', 'function': {'name': 'invoke_skill', 'arguments': json.dumps({'name': skill.name, 'input': 'Read', 'artifact_ids': [artifact.pk]})}}]}}]}
+        self.gateway_responses.append((200, b'data: ' + json.dumps(event).encode() + b'\n\ndata: [DONE]\n\n'))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            self.client.post('/skills/file-reader/prepare/', {'entrypoint': 'main.py'})
+            skill.refresh_from_db()
+            (Path(directory) / f'{skill.preparation.job_id}.skill-result').write_text('{"status":"complete"}')
+            response = self.client.post('/chat/send/', {'message': 'Read private.txt'})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.filter(skill=skill).exists())
+
     def test_multiple_attachments_are_private_and_removed_with_conversation(self):
         from superharry.models import ChatInput, Conversation
         files = [SimpleUploadedFile('table.csv', b'a,b\n1,2\n'), SimpleUploadedFile('report.pdf', b'%PDF synthetic')]

@@ -16,6 +16,7 @@
   {% include 'includes/navigation.html' with show_conversations=True %}
   <main class="main-content chat-content">
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
+    {% if conversation %}<p><a href="{% url 'conversation-files' conversation.pk %}">Conversation files</a></p>{% endif %}
     {% for schedule in schedules %}
       <article>
         <strong>Scheduled task #{{ schedule.pk }}</strong>

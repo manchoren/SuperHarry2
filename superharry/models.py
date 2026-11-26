@@ -93,16 +93,38 @@ class SkillRun(models.Model):
     lifecycle_uncertain = models.BooleanField(default=False)
     execution_payload = models.JSONField(default=dict)
     artifacts_imported = models.BooleanField(default=False)
+    selected_artifact_ids = models.JSONField(default=list)
+
+
+class ArtifactGroup(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="artifact_groups")
+    name = models.CharField(max_length=255)
+    automatic_key = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("conversation", "automatic_key"), condition=~models.Q(automatic_key=""), name="unique_automatic_artifact_group")]
 
 
 class SkillArtifact(models.Model):
     run = models.ForeignKey(SkillRun, on_delete=models.CASCADE, related_name="artifacts")
+    group = models.ForeignKey(ArtifactGroup, null=True, blank=True, on_delete=models.SET_NULL, related_name="artifacts")
     name = models.CharField(max_length=255)
     payload = models.BinaryField()
     partial = models.BooleanField(default=False)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=("run", "name"), name="unique_skill_artifact_name")]
+
+
+class ArtifactDelivery(models.Model):
+    run = models.ForeignKey(SkillRun, on_delete=models.CASCADE, related_name="artifact_deliveries")
+    artifact = models.ForeignKey(SkillArtifact, null=True, blank=True, on_delete=models.SET_NULL, related_name="deliveries")
+    name = models.CharField(max_length=255)
+    partial = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("run", "name"), name="unique_artifact_delivery_name")]
 
 
 class SkillOutbox(models.Model):

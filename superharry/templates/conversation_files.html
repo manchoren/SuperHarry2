@@ -1,0 +1,21 @@
+{% extends 'memories/base.html' %}
+{% block title %}Conversation files{% endblock %}
+{% block content %}
+<h1>Conversation files</h1>
+<p><a href="{% url 'chat-history' conversation.pk %}">Back to {{ conversation.title }}</a></p>
+<p>Generated files with related names are grouped. Move a file to correct a group, or separate it into a new group.</p>
+{% for group in groups %}
+<section>
+  <h2>{{ group.name }}</h2>
+  <ul>{% for artifact in group.artifacts.all %}<li>
+    <a href="{% url 'skill-artifact-download' artifact.pk %}">{{ artifact.name }}</a>{% if artifact.partial %} (partial result){% endif %}
+    <form method="post" action="{% url 'artifact-move' conversation.pk artifact.pk %}">{% csrf_token %}
+      <label for="group-{{ artifact.pk }}">Group for {{ artifact.name }}</label>
+      <select id="group-{{ artifact.pk }}" name="group">{% for option in groups %}<option value="{{ option.pk }}"{% if option.pk == group.pk %} selected{% endif %}>{{ option.name }} (#{{ option.pk }})</option>{% endfor %}<option value="new">New separate group</option></select>
+      <button type="submit">Move</button>
+    </form>
+  </li>{% endfor %}</ul>
+  <p><a href="{% url 'artifact-group-delete' conversation.pk group.pk %}">Delete all versions in {{ group.name }}</a></p>
+</section>
+{% empty %}<p>No generated files yet.</p>{% endfor %}
+{% endblock %}

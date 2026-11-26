@@ -1,0 +1,8 @@
+{% extends 'memories/base.html' %}
+{% block title %}Delete files{% endblock %}
+{% block content %}
+<h1>Delete {{ group.name }}?</h1>
+<p>This deletes all {{ group.artifacts.count }} files in this group. Links in earlier replies will show that the files are unavailable.</p>
+<form method="post">{% csrf_token %}<button name="confirm" value="1" type="submit">Delete all versions</button></form>
+<p><a href="{% url 'conversation-files' conversation.pk %}">Cancel</a></p>
+{% endblock %}

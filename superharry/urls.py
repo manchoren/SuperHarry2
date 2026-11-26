@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import chat, csv_views, inputs, memories, skill_views, soul
+from . import artifacts, chat, csv_views, inputs, memories, skill_views, soul
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -34,6 +34,9 @@ urlpatterns = [
     path("inputs/<int:pk>/download/", inputs.download, name="input-download"),
     path("", chat.page, name="chat"),
     path("chat/<int:conversation_id>/", chat.page, name="chat-history"),
+    path("chat/<int:conversation_id>/files/", artifacts.conversation_files, name="conversation-files"),
+    path("chat/<int:conversation_id>/files/<int:artifact_id>/move/", artifacts.move_artifact, name="artifact-move"),
+    path("chat/<int:conversation_id>/groups/<int:group_id>/delete/", artifacts.delete_group, name="artifact-group-delete"),
     path("chat/send/", chat.send, name="chat-send"),
     path("chat/status/", chat.conversation_status, name="conversation-status"),
     path("chat/<int:conversation_id>/seen/", chat.mark_conversation_seen, name="conversation-seen"),

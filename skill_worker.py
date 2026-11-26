@@ -194,7 +194,7 @@ def main():
         manifest = []
         total = 0
         for item in selected_files:
-            if not isinstance(item, dict) or set(item) != {"id", "name", "data"} or type(item["id"]) is not int or item["id"] <= 0 or not isinstance(item["name"], str) or len(item["name"]) > 255 or not isinstance(item["data"], str):
+            if not isinstance(item, dict) or set(item) != {"id", "name", "data"} or not (type(item["id"]) is int and item["id"] > 0 or isinstance(item["id"], str) and re.fullmatch(r"artifact-[1-9][0-9]*", item["id"])) or not isinstance(item["name"], str) or len(item["name"]) > 255 or not isinstance(item["data"], str):
                 raise ValueError("Invalid selected file")
             if any(existing["id"] == item["id"] for existing in manifest):
                 raise ValueError("Duplicate selected file")

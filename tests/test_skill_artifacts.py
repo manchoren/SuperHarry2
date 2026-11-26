@@ -10,6 +10,8 @@ from superharry.models import Conversation, Message, SkillArtifact, SkillRun
 
 
 class SkillArtifactTests(TransactionTestCase):
+    serialized_rollback = True
+
     def setUp(self):
         self.owner = get_user_model().objects.create_user(username="artifact-owner")
         self.client.force_login(self.owner)
@@ -71,3 +73,61 @@ class SkillArtifactTests(TransactionTestCase):
         self.conversation.delete()
         discard_orphan_artifacts(Path(self.folder.name))
         self.assertFalse(path.exists())
+
+    def test_overwrite_version_group_move_and_delete(self):
+        self.write_result("complete")
+        first = self.client.get(f"/skill-runs/{self.run.job_id}/artifacts/").json()['artifacts'][0]
+        original = SkillArtifact.objects.get()
+        original_url = first['url']
+
+        def deliver(name, data):
+            reply = Message.objects.create(conversation=self.conversation, role='assistant', content='Next')
+            run = SkillRun.objects.create(owner=self.owner, reply=reply, skill_name='demo', repository_skill=True)
+            root = Path(self.folder.name)
+            (root / f'{run.job_id}.skill-result').write_text(json.dumps({'status': 'complete', 'output': 'done'}))
+            (root / f'{run.job_id}.skill-artifacts').write_text(json.dumps({'generation': 0, 'files': [{'name': name, 'data': base64.b64encode(data).decode()}]}))
+            return self.client.get(f'/skill-runs/{run.job_id}/artifacts/').json()
+
+        replacement = deliver('report.pdf', b'updated')
+        self.assertEqual(replacement['artifacts'][0]['url'], original_url)
+        self.assertEqual(self.client.get(original_url).content, b'updated')
+        same = deliver('report.pdf', b'updated')
+        self.assertEqual(same['artifacts'], [])
+        version = deliver('report_ver10.pdf', b'version ten')
+        second = SkillArtifact.objects.get(name='report_ver10.pdf')
+        original.refresh_from_db()
+        self.assertEqual(original.group_id, second.group_id)
+        self.assertEqual(self.client.get(version['artifacts'][0]['url']).content, b'version ten')
+        files_url = f'/chat/{self.conversation.pk}/files/'
+        self.assertContains(self.client.get(files_url), 'report_ver10.pdf')
+        self.client.post(f'/chat/{self.conversation.pk}/files/{second.pk}/move/', {'group': 'new'})
+        second.refresh_from_db()
+        self.assertNotEqual(original.group_id, second.group_id)
+        self.client.post(f'/chat/{self.conversation.pk}/files/{second.pk}/move/', {'group': original.group_id})
+        second.refresh_from_db()
+        self.assertEqual(original.group_id, second.group_id)
+        deletion = f'/chat/{self.conversation.pk}/groups/{original.group_id}/delete/'
+        self.assertContains(self.client.get(deletion), '2 files')
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username='group-other'))
+        self.assertEqual(other.post(deletion, {'confirm': '1'}).status_code, 404)
+        self.assertEqual(other.post(f'/chat/{self.conversation.pk}/files/{second.pk}/move/', {'group': 'new'}).status_code, 404)
+        self.client.post(deletion, {'confirm': '1'})
+        self.assertEqual(self.client.get(original_url).status_code, 404)
+        self.assertTrue(self.client.get(f'/skill-runs/{self.run.job_id}/artifacts/').json()['artifacts'][0]['removed'])
+        self.assertFalse(SkillArtifact.objects.exists())
+
+    def test_same_name_overwrite_targets_selected_artifact(self):
+        first = SkillArtifact.objects.create(run=self.run, name='same.pdf', payload=b'first')
+        reply = Message.objects.create(conversation=self.conversation, role='assistant', content='Other')
+        old = SkillRun.objects.create(owner=self.owner, reply=reply, skill_name='old', repository_skill=True)
+        selected = SkillArtifact.objects.create(run=old, name='same.pdf', payload=b'second')
+        latest = SkillRun.objects.create(owner=self.owner, reply=reply, skill_name='edit', repository_skill=True, selected_artifact_ids=[selected.pk])
+        root = Path(self.folder.name)
+        (root / f'{latest.job_id}.skill-result').write_text(json.dumps({'status': 'complete', 'output': 'done'}))
+        (root / f'{latest.job_id}.skill-artifacts').write_text(json.dumps({'generation': 0, 'files': [{'name': 'same.pdf', 'data': base64.b64encode(b'updated').decode()}]}))
+        self.client.get(f'/skill-runs/{latest.job_id}/artifacts/')
+        first.refresh_from_db()
+        selected.refresh_from_db()
+        self.assertEqual(bytes(first.payload), b'first')
+        self.assertEqual(bytes(selected.payload), b'updated')

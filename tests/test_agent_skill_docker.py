@@ -17,9 +17,10 @@ class AgentSkillDockerTests(TransactionTestCase):
 
     def test_agent_passes_only_selected_conversation_file_to_real_sandbox(self):
         from scripts.run_skill_jobs import process_queue, validate_runtime
-        from superharry.models import ChatInput, Conversation, Message, SkillRun
+        from superharry.models import ChatInput, Conversation, Message, SkillArtifact, SkillRun
 
         selected_id = []
+        selected_kind = ['input']
         calls = []
 
         class Gateway(BaseHTTPRequestHandler):
@@ -27,7 +28,8 @@ class AgentSkillDockerTests(TransactionTestCase):
                 payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 calls.append(payload)
                 if len(calls) == 1:
-                    args = {'name': 'file-probe', 'input': 'Read chosen', 'input_ids': [selected_id[0]]}
+                    args = ({'name': 'file-probe', 'input': 'Read chosen', 'input_ids': [selected_id[0]]}
+                            if selected_kind[0] == 'input' else {'name': 'file-reviser', 'input': 'Revise result.txt', 'artifact_ids': [selected_id[0]]})
                     event = {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'run', 'function': {'name': 'invoke_skill', 'arguments': json.dumps(args)}}]}}]}
                 else:
                     event = {'choices': [{'delta': {'content': 'Queued.'}}]}
@@ -73,6 +75,22 @@ class AgentSkillDockerTests(TransactionTestCase):
             self.assertEqual(bytes(chosen.payload), b'original')
             self.assertFalse(list(Path(directory).glob('*.skill-running')))
             self.assertNotIn('private-other', json.dumps(calls))
+            generated = SkillArtifact.objects.get(name='result.txt')
+            old_url = artifacts[0]['url']
+            reviser = "import json, os; from pathlib import Path; f=json.loads(os.environ['SKILL_INPUT_MANIFEST']); p=Path(f[0]['path']); (Path(os.environ['SKILL_OUTPUT_DIR'])/'result.txt').write_text(p.read_text()+' updated')"
+            self.client.post('/skills/new/', {'name': 'file-reviser', 'purpose': 'Revise', 'instructions': 'Revise selected', 'files': json.dumps({'main.py': reviser}), 'dependencies': '[]'})
+            self.client.post('/skills/file-reviser/prepare/', {'entrypoint': 'main.py'})
+            process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local'))
+            calls.clear()
+            selected_kind[0] = 'artifact'
+            selected_id[0] = generated.pk
+            response = self.client.post(f'/chat/{conversation.pk}/send/', {'message': 'Revise result.txt'})
+            list(response.streaming_content)
+            revised = SkillRun.objects.get(owner=owner, skill_name='file-reviser')
+            process_queue(Path(directory), runtime_check=validate_runtime, image=os.environ.get('SKILL_TEST_IMAGE', 'superharry-skill-worker:local'))
+            updated = self.client.get(f'/skill-runs/{revised.job_id}/artifacts/').json()['artifacts']
+            self.assertEqual(updated[0]['url'], old_url)
+            self.assertEqual(self.client.get(old_url).content, b'generated updated')
 
     def test_chat_csv_attachment_runs_in_docker_and_result_is_private(self):
         from django.core.files.uploadedfile import SimpleUploadedFile

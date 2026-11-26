@@ -292,14 +292,15 @@ def run(request, name):
     if selected_files:
         if len(selected_files) > 5 or sum(len(item.payload) for item in selected_files) > 4 * 1024 * 1024:
             return HttpResponse("Selected files exceed the skill input limit.", status=400)
-        payload["input_files"] = [{"id": item.pk, "name": item.name, "data": base64.b64encode(bytes(item.payload)).decode("ascii")} for item in selected_files]
+        payload["input_files"] = [{"id": f"artifact-{item.pk}" if isinstance(item, SkillArtifact) else item.pk, "name": item.name, "data": base64.b64encode(bytes(item.payload)).decode("ascii")} for item in selected_files]
         payload["requires_file_inputs"] = True
     identifier = uuid4()
     try:
         encode_job(payload)
         with transaction.atomic():
             retained_payload = {key: value for key, value in payload.items() if key != "input_files"}
-            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier, execution_payload=retained_payload)
+            execution = SkillRun.objects.create(skill=skill, skill_name=skill.name, owner=request.user, job_id=identifier, execution_payload=retained_payload,
+                                                selected_artifact_ids=[item.pk for item in selected_files if isinstance(item, SkillArtifact)])
             SkillOutbox.objects.create(job_id=identifier, payload=payload, execution=execution, requested_by=request.user)
             transaction.on_commit(lambda: dispatch_one(identifier))
     except ValueError:
@@ -336,9 +337,9 @@ def artifact_status(request, job_id):
     return JsonResponse({
         "pending": outcome is None or not job.artifacts_imported,
         "status": outcome.get("status") if outcome else None,
-        "artifacts": [{"name": artifact.name, "partial": artifact.partial,
-                       "url": reverse("skill-artifact-download", args=(artifact.pk,))}
-                      for artifact in job.artifacts.all().defer("payload")],
+        "artifacts": [{"name": delivery.name, "partial": delivery.partial, "removed": delivery.artifact_id is None,
+                       "url": reverse("skill-artifact-download", args=(delivery.artifact_id,)) if delivery.artifact_id else None}
+                      for delivery in job.artifact_deliveries.all()],
     })
 
 

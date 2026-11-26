@@ -2,6 +2,7 @@
 import hashlib
 import base64
 import json
+import re
 from pathlib import Path
 from uuid import UUID
 
@@ -10,7 +11,7 @@ from django.db import DatabaseError, connection, transaction
 from django.db.models import F
 
 from .csv_protocol import publish, read_limited
-from .models import SkillArtifact, SkillOutbox, SkillPreparation, SkillRun
+from .models import ArtifactDelivery, ArtifactGroup, SkillArtifact, SkillOutbox, SkillPreparation, SkillRun
 
 
 MAX_JOB_BYTES = 8 * 1024 * 1024
@@ -209,6 +210,14 @@ def discard_orphan_artifacts(directory):
             discard_artifact_spool(path)
 
 
+def artifact_group_label(name):
+    stem, dot, extension = name.rpartition(".")
+    if not dot:
+        stem, extension = name, ""
+    stem = re.sub(r"_ver(?:[2-9]|[1-9][0-9]+)$", "", stem, flags=re.IGNORECASE)
+    return stem + ("." + extension if extension else "")
+
+
 def import_artifacts(directory, run, outcome):
     if directory is None:
         return
@@ -244,7 +253,32 @@ def import_artifacts(directory, run, outcome):
                 return
             if not current.artifacts_imported:
                 for name, content in decoded:
-                    SkillArtifact.objects.update_or_create(run=current, name=name, defaults={"payload": content, "partial": outcome.get("status") != "complete"})
+                    artifact = None
+                    group = None
+                    if current.reply_id:
+                        conversation = current.reply.conversation
+                        matches = SkillArtifact.objects.filter(run__owner=current.owner, run__reply__conversation=conversation, name=name).order_by("pk")
+                        selected = list(matches.filter(pk__in=current.selected_artifact_ids)[:2])
+                        if len(selected) == 1:
+                            artifact = selected[0]
+                        elif not selected:
+                            existing = list(matches[:2])
+                            if len(existing) == 1:
+                                artifact = existing[0]
+                    partial = outcome.get("status") != "complete"
+                    if artifact is not None:
+                        if bytes(artifact.payload) == content:
+                            continue
+                        artifact.payload = content
+                        artifact.partial = partial
+                        artifact.save(update_fields=("payload", "partial"))
+                    else:
+                        if current.reply_id:
+                            label = artifact_group_label(name)
+                            key = hashlib.sha256(label.casefold().encode("utf-8")).hexdigest()
+                            group, _ = ArtifactGroup.objects.get_or_create(owner=current.owner, conversation=conversation, automatic_key=key, defaults={"name": label})
+                        artifact = SkillArtifact.objects.create(run=current, name=name, payload=content, partial=partial, group=group)
+                    ArtifactDelivery.objects.update_or_create(run=current, name=name, defaults={"artifact": artifact, "partial": partial})
                 current.artifacts_imported = True
                 current.save(update_fields=("artifacts_imported",))
             run.artifacts_imported = True

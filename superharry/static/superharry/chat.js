@@ -152,6 +152,11 @@ document.querySelectorAll(".skill-artifacts").forEach((container) => {
       container.replaceChildren();
       value.artifacts.forEach((artifact) => {
         const row = document.createElement("p");
+        if (artifact.removed) {
+          row.textContent = `${artifact.name} is no longer available`;
+          container.append(row);
+          return;
+        }
         const link = document.createElement("a");
         link.href = artifact.url;
         link.textContent = `Download ${artifact.name}`;
