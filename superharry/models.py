@@ -135,6 +135,7 @@ class Message(models.Model):
     )
     role = models.CharField(max_length=9, choices=Role)
     content = models.TextField()
+    selected_skill = models.CharField(max_length=48, blank=True, default="")
     complete = models.BooleanField(default=True)
     in_progress = models.BooleanField(default=False)
 

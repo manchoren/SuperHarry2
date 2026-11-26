@@ -19,6 +19,26 @@ from superharry.soul import guidance
 
 
 class ChatTests(TestCase):
+    def test_selected_skill_is_sent_with_the_message(self):
+        page = self.client.get('/')
+        self.assertContains(page, 'value="summarize"')
+        self.assertEqual(len(self.requests), 0)
+        response = self.client.post('/chat/send/', {'message': 'Help me', 'selected_skill': 'summarize'})
+        list(response.streaming_content)
+        self.assertIn('"name": "summarize"', self.requests[-1][2]['messages'][1]['content'])
+        self.assertContains(self.client.get(response['Location']), 'Skill: summarize')
+        self.assertEqual(self.client.post('/chat/send/', {'message': 'Help', 'selected_skill': 'missing'}).status_code, 400)
+
+    def test_retry_preserves_selected_skill(self):
+        self.gateway_responses.append((503, b''))
+        response = self.client.post('/chat/send/', {'message': 'Help me', 'selected_skill': 'summarize'})
+        list(response.streaming_content)
+        from superharry.models import Message
+        reply = Message.objects.get(role=Message.Role.ASSISTANT)
+        retry = self.client.post(f'/chat/{reply.conversation_id}/retry/{reply.pk}/')
+        list(retry.streaming_content)
+        self.assertIn('"name": "summarize"', self.requests[-1][2]['messages'][1]['content'])
+
     def test_soul_guidance_is_sent_and_visible_read_only(self):
         response = self.client.post('/chat/send/', {'message': 'Hello'})
         list(response.streaming_content)

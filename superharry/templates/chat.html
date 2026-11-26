@@ -36,6 +36,7 @@
       {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+          {% if message.selected_skill %}<small>Skill: {{ message.selected_skill }}</small>{% endif %}
           {% for occurrence in message.scheduleoccurrence_set.all %}
             <small>Scheduled task #{{ occurrence.schedule_id }}</small>
             {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
@@ -84,6 +85,11 @@
       {% endif %}
       <label for="message">Message</label>
       <textarea id="message" name="message" rows="3" required></textarea>
+      <label for="selected-skill">Skill (optional)</label>
+      <input id="selected-skill" name="selected_skill" list="available-skills" autocomplete="off" placeholder="Search skills">
+      <datalist id="available-skills">
+        {% for item in available_skills %}<option value="{{ item.name }}">{{ item.purpose }}</option>{% endfor %}
+      </datalist>
       <label for="attachment">Attach a CSV file</label>
       <input id="attachment" type="file" name="attachment" accept=".csv,text/csv">
       <small>To summarize it, ask “Summarize my CSV” in your message.</small>
