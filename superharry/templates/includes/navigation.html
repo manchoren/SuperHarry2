@@ -17,6 +17,7 @@
   </nav>
   {% endif %}
   <div class="sidebar-footer">
+    <a href="{% url 'account-settings' %}" aria-label="Profile settings">{% include 'includes/avatar.html' %}</a>
     {% include 'includes/theme.html' %}
     <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="subtle-button" type="submit">Sign out</button></form>
   </div>

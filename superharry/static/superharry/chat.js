@@ -10,7 +10,12 @@ function appendMessage(role, text) {
   const content = document.createElement("p");
   label.textContent = role;
   content.textContent = text;
-  article.append(label, content);
+  article.append(label);
+  if (role === "You") {
+    const avatar = document.querySelector(".sidebar-footer .user-avatar");
+    if (avatar) article.append(avatar.cloneNode(true));
+  }
+  article.append(content);
   messages.append(article);
   return content;
 }

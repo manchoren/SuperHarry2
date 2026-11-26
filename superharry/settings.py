@@ -18,6 +18,7 @@ LOGIN_REDIRECT_URL = "chat"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "America/Guayaquil")
 USE_TZ = True
+AVATAR_MAX_BYTES = int(os.environ.get("DJANGO_AVATAR_MAX_BYTES", str(2 * 1024 * 1024)))
 
 INSTALLED_APPS = [
     "django.contrib.admin",

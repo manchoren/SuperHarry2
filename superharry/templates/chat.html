@@ -36,6 +36,7 @@
       {% for message in history %}
         <article>
           <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+          {% if message.role == "user" %}{% include 'includes/avatar.html' %}{% endif %}
           {% if message.selected_skill %}<small>Skill: {{ message.selected_skill }}</small>{% endif %}
           {% for occurrence in message.scheduleoccurrence_set.all %}
             <small>Scheduled task #{{ occurrence.schedule_id }}</small>

@@ -46,7 +46,7 @@ class ChatTests(TestCase):
         page = self.client.get('/settings/')
         self.assertContains(page, 'Agent guidance')
         self.assertContains(page, 'Respect user privacy')
-        self.assertEqual(self.client.post('/settings/', {'soul': 'changed'}).status_code, 405)
+        self.assertEqual(self.client.post('/settings/', {'soul': 'changed'}).status_code, 400)
         self.assertRedirects(Client().get('/settings/'), '/login/?next=/settings/')
 
     def test_explicit_csv_request_queues_the_selected_owned_file(self):

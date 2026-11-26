@@ -9,6 +9,7 @@ urlpatterns = [
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
     path("settings/", soul.settings, name="account-settings"),
+    path("settings/avatar/", soul.avatar, name="account-avatar"),
     path("memories/", memories.MemoryList.as_view(), name="memories"),
     path("skills/", skill_views.catalog, name="skills"),
     path("skills/new/", skill_views.create, name="skill-create"),

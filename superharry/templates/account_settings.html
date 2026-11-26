@@ -2,6 +2,22 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>Settings</h1>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p role="status">{{ notice }}</p>{% endif %}
+<h2>Profile image</h2>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  <input type="hidden" name="action" value="avatar">
+  <label for="avatar">PNG or JPEG image</label>
+  <input id="avatar" name="avatar" type="file" accept="image/png,image/jpeg" required>
+  <button type="submit">Update image</button>
+</form>
+<form method="post">{% csrf_token %}<button name="action" value="remove-avatar" type="submit">Remove image</button></form>
+<h2>Change password</h2>
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="action" value="password">
+  {{ password_form.as_p }}
+  <button type="submit">Change password</button>
+</form>
 <h2>Agent guidance</h2>
 <p>These general instructions guide the agent. Application permissions and safeguards are enforced separately.</p>
 <pre style="white-space: pre-wrap">{{ soul }}</pre>
