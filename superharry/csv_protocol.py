@@ -5,7 +5,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 
-MAX_INPUT_BYTES = 256 * 1024
 MAX_OUTPUT_BYTES = 16 * 1024
 
 
@@ -38,12 +37,6 @@ def publish(path, data, *, replace):
                 pass
     finally:
         temporary.unlink(missing_ok=True)
-
-
-def enqueue(directory, job_id, payload):
-    if any((directory / f"{job_id}.{suffix}").exists() for suffix in ("running", "result")):
-        return
-    publish(directory / f"{job_id}.input", payload, replace=False)
 
 
 def read_result(directory, job_id):

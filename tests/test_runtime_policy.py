@@ -1,13 +1,9 @@
 import json
-import subprocess
 from unittest.mock import patch
-from uuid import uuid4
 
 from django.test import SimpleTestCase
 
 from scripts.run_skill_jobs import validate_runtime
-from scripts.run_csv_jobs import run_job as run_csv_job
-from tests.csv_runner_smoke import check_runtime as check_csv_runtime
 
 
 class RuntimePolicyTests(SimpleTestCase):
@@ -41,26 +37,3 @@ class RuntimePolicyTests(SimpleTestCase):
         with patch("scripts.run_skill_jobs.subprocess.check_output", side_effect=OSError("unavailable")):
             with self.assertRaises(RuntimeError):
                 validate_runtime()
-
-    def test_csv_smoke_rejects_containerd_240(self):
-        components = json.dumps([
-            {"Name": "runc", "Version": "1.5.3"},
-            {"Name": "containerd", "Version": "2.4.0"},
-        ])
-        with patch("tests.csv_runner_smoke.subprocess.check_output", return_value=components):
-            with self.assertRaisesRegex(SystemExit, "containerd 2.4.0"):
-                check_csv_runtime()
-
-    def test_csv_smoke_accepts_the_same_verified_baseline(self):
-        components = json.dumps([
-            {"Name": "runc", "Version": "1.4.3"},
-            {"Name": "containerd", "Version": "2.3.6"},
-        ])
-        with patch("tests.csv_runner_smoke.subprocess.check_output", return_value=components):
-            check_csv_runtime()
-
-    def test_failed_csv_container_does_not_require_host_sigalrm(self):
-        with patch("scripts.run_csv_jobs.subprocess.run", side_effect=subprocess.CalledProcessError(1, "docker")):
-            self.assertEqual(run_csv_job(uuid4(), b"invalid"), {"status": "failed"})
-        with patch("scripts.run_csv_jobs.subprocess.run", side_effect=subprocess.CalledProcessError(142, "docker")):
-            self.assertEqual(run_csv_job(uuid4(), b"slow"), {"status": "timeout"})

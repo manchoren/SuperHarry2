@@ -40,13 +40,9 @@ For an already provisioned installation, run `python scripts/deploy.py` from the
 
 Run `python scripts/deploy.py --watch` to deploy once and then redeploy whenever the application, tests, Dockerfile, requirements, or Compose files change. Stop the watcher with Ctrl+C. Every deployment restarts Django and can interrupt active replies; use this mode when that behavior is appropriate.
 
-### Isolated CSV summaries
+### CSV summaries and previous results
 
-On a Linux Docker host, create a dedicated spool directory writable by Django's UID 10001 with access limited to that UID and the host operator. Set `CSV_SPOOL_DIRECTORY` to its absolute path before running the provisioner, or add `-f compose.csv.yaml` to a manual Django Compose invocation. Build the worker with `docker build --target csv-worker -t superharry-csv-worker:local .`.
-
-Run `python3 scripts/run_csv_jobs.py --spool "$CSV_SPOOL_DIRECTORY"` as a host operator with Docker access. Django queues only owner-approved CSV files. The processor launches a disposable unprivileged container per job with no network, no host mounts, and bounded resources. The owner can reopen the job page to view and download the result.
-
-Run `python -m tests.csv_runner_smoke` with Docker access on the test host. The smoke test applies the [runtime policy](runtime-policy.md), then exercises network denial, read-only execution, resource bounds, and disposable cleanup. The policy uses conservative minimums of runc `1.4.3` and containerd `2.3.6` and explicitly rejects the affected containerd `2.4.0`. Record Docker Desktop results independently from the historical VM results.
+CSV summaries run through the skill worker described below. Attach a UTF-8 CSV in chat and explicitly request a summary. The saved reply links to the owner-only result. Preserve the existing `CSV_SPOOL_DIRECTORY` and Compose overlay if the installation has previously delivered CSV results; they remain accessible from the chat sidebar. The legacy CSV worker is no longer used for new runs.
 
 ### Isolated skill preparation and execution
 

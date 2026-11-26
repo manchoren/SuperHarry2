@@ -18,6 +18,132 @@ from django.test import Client, TestCase
 
 
 class ChatTests(TestCase):
+    def test_explicit_csv_request_queues_the_selected_owned_file(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name,amount\nA,4\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Summarize my CSV file"})
+            output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="csv-summary")
+            self.assertIn(str(run.job_id), output)
+            self.assertContains(self.client.get(response["Location"]), f'href="/skill-runs/{run.job_id}/"')
+
+    def test_agent_cannot_summarize_without_a_user_request(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Here is my file"})
+            output = "".join(json.loads(chunk).get("text", "") for chunk in response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+            self.assertIn("explicitly ask", output)
+
+    def test_mentioning_a_summary_does_not_authorize_a_csv_run(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Here is the summary from yesterday."})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_negated_request_does_not_authorize_csv_run(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "I didn't ask you to summarize this CSV."})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_question_about_summarizing_does_not_authorize_csv_run(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "How would you summarize a CSV?"})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_request_to_summarize_text_does_not_authorize_csv_run(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Summarize this text: the meeting is tomorrow."})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_user_can_request_a_summary_in_natural_language(self):
+        from superharry.models import ChatInput, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Please provide a summary of my CSV."})
+            list(response.streaming_content)
+            self.assertTrue(SkillRun.objects.filter(owner=self.user, skill_name="csv-summary").exists())
+
+    def test_csv_skill_cannot_access_another_users_input(self):
+        from superharry.models import ChatInput, SkillRun
+        other = get_user_model().objects.create_user(username="other-csv")
+        item = ChatInput.objects.create(owner=other, name="secret.csv", media_type="text/plain", payload=b"secret\nvalue\n")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Summarize my CSV"})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_csv_skill_cannot_substitute_another_owned_file_for_the_attachment(self):
+        from superharry.models import ChatInput, SkillRun
+        old = ChatInput.objects.create(owner=self.user, name="old.csv", media_type="text/plain", payload=b"old\n1\n")
+        args = json.dumps({"name": "csv-summary", "input": str(old.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {"message": "Summarize my CSV", "attachment":
+                SimpleUploadedFile("new.csv", b"new\n2\n", content_type="text/csv")})
+            list(response.streaming_content)
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_scheduled_csv_skill_cannot_use_an_unselected_owned_input(self):
+        from superharry.models import ChatInput, Conversation, Schedule, SkillRun
+        item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name\nA\n")
+        conversation = Conversation.objects.create(owner=self.user, title="Work")
+        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Summarize my CSV",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
+        args = json.dumps({"name": "csv-summary", "input": str(item.pk)})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "csv-1", "function": {"name": "invoke_skill", "arguments": args}}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
+                call_command("run_schedules", stdout=StringIO())
+            self.assertFalse(SkillRun.objects.exists())
+
+    def test_chat_attachment_is_available_without_automatically_running_a_skill(self):
+        from superharry.models import ChatInput, SkillRun
+        response = self.client.post("/chat/send/", {"message": "Here is my file", "attachment":
+            SimpleUploadedFile("sales.csv", b"name,amount\nA,4\n", content_type="text/csv")})
+        list(response.streaming_content)
+        self.assertEqual(ChatInput.objects.get(owner=self.user).name, "sales.csv")
+        self.assertFalse(SkillRun.objects.exists())
+
     def test_chat_updates_skill_with_pending_run(self):
         from superharry.models import SkillPreparation, VmSkill
         from superharry.skill_jobs import skill_fingerprint
@@ -384,52 +510,6 @@ class ChatTests(TestCase):
         other.force_login(get_user_model().objects.create_user(username="other"))
         self.assertEqual(other.post(f"/schedules/{child.pk}/cancel/").status_code, 404)
         self.assertEqual(self.client.post(f"/schedules/{child.pk}/cancel/").status_code, 302)
-
-    def test_scheduled_csv_approval_cannot_reference_another_owners_file(self):
-        from superharry.models import Conversation, CsvFile, CsvSummary, Schedule
-
-        other = get_user_model().objects.create_user(username="other")
-        record = CsvFile.objects.create(owner=other, name="secret.csv", payload=b"secret")
-        conversation = Conversation.objects.create(owner=self.user, title="Work")
-        Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Summarize",
-            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
-        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "approval-1", "function": {"name": "request_csv_approval", "arguments": json.dumps({"file_id": record.pk})}}]}}]}
-        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
-        self.gateway_responses.extend([(200, payload), (200, payload)])
-        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
-            call_command("run_schedules", stdout=StringIO())
-        page = self.client.get(f"/chat/{conversation.pk}/")
-        self.assertNotContains(page, "secret.csv")
-        self.assertNotContains(page, f'/csv/{record.pk}/')
-        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
-
-    def test_scheduled_csv_approval_requires_the_owner_and_does_not_start_a_job(self):
-        from superharry.models import Conversation, CsvFile, CsvSummary, Schedule
-
-        record = CsvFile.objects.create(owner=self.user, name="report.csv", payload=b"value\n1\n")
-        conversation = Conversation.objects.create(owner=self.user, title="Work")
-        schedule = Schedule.objects.create(owner=self.user, conversation=conversation, prompt="Summarize the file",
-            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/free-model")
-        arguments = json.dumps({"file_id": record.pk})
-        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "approval-1", "function": {"name": "request_csv_approval", "arguments": arguments}}]}}]}
-        payload = b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"
-        self.gateway_responses.append((200, b'data: {"choices":[{"delta":{"content":"Prepared the summary request."}}]}\n\n' + payload))
-        self.gateway_responses.append((200, payload))
-        with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
-            call_command("run_schedules", stdout=StringIO())
-        self.assertEqual(schedule.occurrences.get().status, "needs_user_input")
-        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
-        page = self.client.get(f"/chat/{conversation.pk}/")
-        self.assertContains(page, "Prepared the summary request.")
-        self.assertContains(page, f'/csv/{record.pk}/')
-        self.assertContains(page, "Review and approve CSV")
-        other = Client()
-        other.force_login(get_user_model().objects.create_user(username="other"))
-        self.assertEqual(other.post(f"/csv/{record.pk}/approve/", {"confirm": "yes"}).status_code, 404)
-        self.assertFalse(CsvSummary.objects.filter(file=record).exists())
-        with TemporaryDirectory() as directory, self.settings(CSV_SPOOL=directory):
-            self.assertEqual(self.client.post(f"/csv/{record.pk}/approve/", {"confirm": "yes"}).status_code, 302)
-            self.assertEqual(len(list(Path(directory).glob("*.input"))), 1)
 
     def test_required_decision_shows_partial_work_and_keeps_daily_timetable(self):
         from superharry.models import Conversation, Schedule

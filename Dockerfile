@@ -7,11 +7,6 @@ RUN apt-get update \
     && useradd --uid 10001 --no-create-home app \
     && install -d -o app -g app /data
 
-FROM python-base AS csv-worker
-COPY csv_worker.py /worker.py
-USER app
-ENTRYPOINT ["/opt/venv/bin/python", "-IB", "/worker.py"]
-
 FROM python-base AS skill-worker
 COPY skill_worker.py /skill_worker.py
 COPY skill_network_client.py /skill_network_client.py

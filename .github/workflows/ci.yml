@@ -87,12 +87,13 @@ jobs:
           version: v29.10.0
       - name: Verify sandbox runtime policy
         run: python -c "from scripts.run_skill_jobs import validate_runtime; validate_runtime()"
-      - name: Build isolated worker images
+      - name: Build isolated worker image
         run: |
-          docker build --target csv-worker -t superharry-csv-worker:local .
           docker build --target skill-worker -t superharry-skill-worker:local .
-      - name: Check CSV sandbox
-        run: python -m tests.csv_runner_smoke
+      - name: Check CSV skill through chat
+        env:
+          SKILL_NETWORK_DOCKER_SMOKE: '1'
+        run: python -m django test tests.test_agent_skill_docker.AgentSkillDockerTests.test_chat_csv_attachment_runs_in_docker_and_result_is_private
       - name: Check skill sandbox
         run: python -m tests.skill_sandbox_smoke
       - name: Check skill preparation and execution

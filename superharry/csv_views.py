@@ -4,11 +4,11 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_http_methods
 
-from .csv_protocol import MAX_INPUT_BYTES, enqueue, read_result
+from .csv_protocol import read_result
 from .models import CsvFile, CsvSummary
 
 
@@ -18,20 +18,9 @@ def spool():
 
 @never_cache
 @login_required
-@require_http_methods(("GET", "POST"))
+@require_http_methods(("GET",))
 def upload(request):
-    files = CsvFile.objects.defer("payload").filter(owner=request.user).order_by("-pk")
-    if request.method == "POST":
-        incoming = request.FILES.get("file")
-        if not incoming or not incoming.name.lower().endswith(".csv") or incoming.size > MAX_INPUT_BYTES:
-            return render(request, "csv/upload.html", {
-                "error": "Choose a CSV file up to 256 KiB.",
-                "files": files,
-            }, status=400)
-        record = CsvFile.objects.create(
-            owner=request.user, name=incoming.name, payload=incoming.read(MAX_INPUT_BYTES + 1)
-        )
-        return redirect("csv-detail", pk=record.pk)
+    files = CsvFile.objects.defer("payload").filter(owner=request.user, summary__isnull=False).order_by("-pk")
     return render(request, "csv/upload.html", {"files": files})
 
 
@@ -47,24 +36,6 @@ def detail(request, pk):
     return render(request, "csv/detail.html", {
         "record": record, "job": job, "result": result, "runner_configured": spool() is not None,
     })
-
-
-@never_cache
-@login_required
-@require_POST
-def approve(request, pk):
-    owned_file = get_object_or_404(CsvFile, pk=pk, owner=request.user)
-    if request.POST.get("confirm") != "yes":
-        return HttpResponse("Confirm this file before submitting a job.", status=400)
-    directory = spool()
-    if directory is None:
-        return HttpResponse("CSV processing is not configured.", status=503)
-    job, _ = CsvSummary.objects.get_or_create(file=owned_file)
-    try:
-        enqueue(directory, job.job_id, bytes(owned_file.payload))
-    except OSError:
-        return HttpResponse("The CSV runner could not accept the job. Try again.", status=503)
-    return redirect("csv-detail", pk=pk)
 
 
 @never_cache

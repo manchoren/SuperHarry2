@@ -1,14 +1,7 @@
 {% extends "memories/base.html" %}
-{% block title %}Summarize a CSV{% endblock %}
+{% block title %}Previous CSV results{% endblock %}
 {% block content %}
-  <h1>Summarize a CSV</h1>
-  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-  <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <label for="csv">CSV file (up to 256 KiB)</label>
-    <input id="csv" type="file" name="file" accept=".csv,text/csv" required>
-    <button type="submit">Review file</button>
-  </form>
+  <h1>Previous CSV results</h1>
   {% if files %}
     <h2>Your CSV files</h2>
     <ul>

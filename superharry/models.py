@@ -78,6 +78,8 @@ class SkillRun(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     skill = models.ForeignKey(VmSkill, null=True, on_delete=models.SET_NULL)
     skill_name = models.CharField(max_length=48)
+    repository_skill = models.BooleanField(default=False)
+    reply = models.ForeignKey("Message", null=True, blank=True, on_delete=models.SET_NULL, related_name="skill_runs")
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     lifecycle = models.CharField(max_length=16, blank=True, default="")
     lifecycle_generation = models.PositiveIntegerField(default=0)
@@ -114,6 +116,7 @@ class CsvSummary(models.Model):
 
 class ChatInput(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    message = models.ForeignKey("Message", null=True, blank=True, on_delete=models.SET_NULL, related_name="attachments")
     name = models.CharField(max_length=255)
     media_type = models.CharField(max_length=32)
     payload = models.BinaryField()

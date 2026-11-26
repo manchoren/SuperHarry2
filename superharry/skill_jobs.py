@@ -89,7 +89,7 @@ def dispatch_one(job_id):
                     return False
             else:
                 owner_job = SkillRun.objects.select_for_update().filter(pk=job.execution_id).first()
-                if (owner_job is None or owner_job.skill_id is None or owner_job.job_id != job_id
+                if (owner_job is None or (owner_job.skill_id is None and not owner_job.repository_skill) or owner_job.job_id != job_id
                         or owner_job.owner_id != job.requested_by_id):
                     if owner_job is not None:
                         publish(directory / f"{job_id}.skill-result", b'{"status":"failed","reason":"skill_removed"}', replace=False)

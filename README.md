@@ -1,6 +1,6 @@
 # SuperHarry2
 
-SuperHarry2 is a Django chat application with a conversation sidebar, a message composer, and streaming replies. OmniRoute manages language models and providers. The current working environment is Docker Desktop on Windows. Agent-selected skills and the migration of CSV summarization into a skill remain planned work.
+SuperHarry2 is a Django chat application with a conversation sidebar, a message composer, and streaming replies. OmniRoute manages language models and providers. The current working environment is Docker Desktop on Windows. Users can request CSV summaries in chat through the isolated skill runtime.
 
 - [Architecture and agreed decisions](docs/architecture.md)
 - [Milestones and acceptance criteria](docs/milestones.md)

@@ -24,7 +24,6 @@ urlpatterns = [
     path("memories/<int:pk>/delete/", memories.MemoryDelete.as_view(), name="memory-delete"),
     path("csv/", csv_views.upload, name="csv-upload"),
     path("csv/<int:pk>/", csv_views.detail, name="csv-detail"),
-    path("csv/<int:pk>/approve/", csv_views.approve, name="csv-approve"),
     path("csv/<int:pk>/download/", csv_views.download, name="csv-download"),
     path("inputs/", inputs.manage, name="inputs"),
     path("inputs/<int:pk>/delete/", inputs.delete, name="input-delete"),

@@ -17,13 +17,8 @@
     <p role="status">An approved summary is queued or running.</p>
     <a href="{% url 'csv-detail' record.pk %}">Refresh status</a>
   {% endif %}
-  {% if runner_configured and not result %}
-    <form method="post" action="{% url 'csv-approve' record.pk %}">
-      {% csrf_token %}
-      <button name="confirm" value="yes" type="submit">Approve summary for this file</button>
-    </form>
-  {% elif not runner_configured %}
+  {% if not runner_configured %}
     <p>The CSV runner is unavailable.</p>
   {% endif %}
-  <a href="{% url 'csv-upload' %}">Choose another file</a>
+  <a href="{% url 'csv-upload' %}">Previous CSV results</a>
 {% endblock %}
