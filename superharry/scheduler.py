@@ -85,7 +85,8 @@ def recover_occurrences():
                 maximum = override.max_response_characters
             remaining = max(0, maximum - len(occurrence.reply.content))
             occurrence.reply.content += ("\n" + text)[:remaining]
-            occurrence.reply.save(update_fields=("content",))
+            occurrence.reply.completed_at = timezone.now()
+            occurrence.reply.save(update_fields=("content", "completed_at"))
 
     for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_preparation").select_related("reply"):
         outcome = result(spool(), occurrence.preparation_job) if occurrence.preparation_job else {"status": "failed"}
@@ -132,7 +133,8 @@ def recover_occurrences():
                 if reply:
                     reply.in_progress = False
                     reply.complete = True
-                    reply.save(update_fields=("in_progress", "complete"))
+                    reply.completed_at = timezone.now()
+                    reply.save(update_fields=("in_progress", "complete", "completed_at"))
                 if submission:
                     submission.active = False
                     submission.save(update_fields=("active",))

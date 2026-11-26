@@ -94,6 +94,51 @@ async function submitChat(event) {
 
 chatForms.forEach((form) => form.addEventListener("submit", submitChat));
 
+const conversationNav = document.querySelector(".conversation-nav");
+if (conversationNav) {
+  let busy = false;
+  let visibleOpenRecorded = false;
+  const relative = (timestamp) => {
+    if (!timestamp) return "Seen";
+    const seconds = Math.max(0, (Date.now() - Date.parse(timestamp)) / 1000);
+    if (seconds < 60) return "Seen just now";
+    const units = [[31536000, "y"], [604800, "wk"], [86400, "d"], [3600, "h"], [60, "min"]];
+    const [size, label] = units.find(([length]) => seconds >= length);
+    return `Seen ${Math.floor(seconds / size)} ${label} ago`;
+  };
+  async function updateConversationStates() {
+    if (busy) return;
+    busy = true;
+    try {
+      let response = await fetch(conversationNav.dataset.statusUrl, {cache: "no-store"});
+      if (!response.ok) return;
+      let data = await response.json();
+      const current = data.conversations.find((item) => String(item.id) === conversationNav.dataset.activeId);
+      if (document.visibilityState === "visible" && current && (!visibleOpenRecorded || current.state === "unread")) {
+        const token = document.querySelector('#composer input[name="csrfmiddlewaretoken"]')?.value;
+        if (token) {
+          const body = new URLSearchParams();
+          if (!visibleOpenRecorded) body.set("opened", "1");
+          const marked = await fetch(conversationNav.dataset.seenUrl, {method: "POST", headers: {"X-CSRFToken": token}, body});
+          if (marked.ok) {
+            visibleOpenRecorded = true;
+            response = await fetch(conversationNav.dataset.statusUrl, {cache: "no-store"});
+            if (response.ok) data = await response.json();
+          }
+        }
+      }
+      data.conversations.forEach((item) => {
+        const label = conversationNav.querySelector(`[data-conversation-id="${item.id}"]`);
+        if (label) label.textContent = item.state === "thinking" ? "◌ Thinking…" : item.state === "unread" ? "● New response" : `✓ ${relative(item.last_opened)}`;
+      });
+    } catch { /* Retry on the next poll. */ }
+    finally { busy = false; }
+  }
+  updateConversationStates();
+  window.setInterval(updateConversationStates, 5000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") updateConversationStates(); });
+}
+
 document.querySelectorAll(".skill-artifacts").forEach((container) => {
   async function refresh() {
     try {

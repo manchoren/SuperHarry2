@@ -11,9 +11,9 @@
     {% if has_previous_csv_results %}<a href="{% url 'csv-upload' %}">Previous CSV results</a>{% endif %}
   </nav>
   {% if show_conversations %}
-  <nav class="conversation-nav" aria-label="Conversations">
+  <nav class="conversation-nav" aria-label="Conversations" data-status-url="{% url 'conversation-status' %}"{% if conversation %} data-active-id="{{ conversation.pk }}" data-seen-url="{% url 'conversation-seen' conversation.pk %}"{% endif %}>
     <h2>Conversations</h2>
-    <ul>{% for item in conversations %}<li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }}</a></li>{% empty %}<li class="muted">No conversations yet</li>{% endfor %}</ul>
+    <ul>{% for item in conversations %}<li><a href="{% url 'chat-history' item.pk %}"{% if item.pk == conversation.pk %} aria-current="page"{% endif %}>{{ item.title }} <small class="conversation-state" data-conversation-id="{{ item.pk }}" aria-live="polite"></small></a></li>{% empty %}<li class="muted">No conversations yet</li>{% endfor %}</ul>
   </nav>
   {% endif %}
   <div class="sidebar-footer">

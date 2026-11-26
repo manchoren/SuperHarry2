@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, F, OuterRef, Q, Subquery
+from django.db.models import Exists, F, Max, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.http import Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -230,6 +230,38 @@ def page(request, conversation_id=None):
             running=Exists(ScheduleOccurrence.objects.filter(schedule_id=OuterRef("pk"), status__in=("claimed", "running")))
         ) if conversation else (),
     })
+
+
+@never_cache
+@login_required
+@require_GET
+def conversation_status(request):
+    active = Message.objects.filter(conversation_id=OuterRef("pk"), role=Message.Role.ASSISTANT, in_progress=True)
+    conversations = Conversation.objects.filter(owner=request.user).annotate(
+        thinking=Exists(active),
+        latest_completed=Max("messages__completed_at", filter=Q(messages__role=Message.Role.ASSISTANT, messages__complete=True)),
+    )
+    items = []
+    for conversation in conversations:
+        unread = conversation.latest_completed and (not conversation.seen_through or conversation.latest_completed > conversation.seen_through)
+        items.append({"id": conversation.pk, "state": "thinking" if conversation.thinking else "unread" if unread else "seen",
+                      "last_opened": conversation.last_opened_at.isoformat() if conversation.last_opened_at else None})
+    return JsonResponse({"conversations": items})
+
+
+@never_cache
+@login_required
+@require_POST
+def mark_conversation_seen(request, conversation_id):
+    conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
+    now = timezone.now()
+    conversation.seen_through = now
+    fields = ["seen_through"]
+    if request.POST.get("opened") == "1":
+        conversation.last_opened_at = now
+        fields.append("last_opened_at")
+    conversation.save(update_fields=fields)
+    return HttpResponse(status=204)
 
 
 @never_cache
@@ -619,7 +651,8 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
         with transaction.atomic():
             reply.complete = complete
             reply.in_progress = False
-            reply.save(update_fields=("complete", "in_progress"))
+            reply.completed_at = timezone.now() if complete else None
+            reply.save(update_fields=("complete", "in_progress", "completed_at"))
             if scheduled and waiting_for_user:
                 ScheduleOccurrence.objects.filter(reply=reply).update(status="needs_user_input")
             submission.active = False

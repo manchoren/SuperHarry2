@@ -15,6 +15,8 @@ class Conversation(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=100)
     memory_enabled = models.BooleanField(default=False)
+    last_opened_at = models.DateTimeField(null=True, blank=True)
+    seen_through = models.DateTimeField(null=True, blank=True)
 
 
 class ChatRoute(models.Model):
@@ -154,6 +156,7 @@ class Message(models.Model):
     selected_skill = models.CharField(max_length=48, blank=True, default="")
     complete = models.BooleanField(default=True)
     in_progress = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("pk",)
