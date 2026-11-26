@@ -3,7 +3,7 @@
 ## Establish the target
 
 - Read the current ticket and its blockers using the issue tracker guide. Keep every acceptance criterion visible through implementation and review.
-- Use the active workspace and honor the user's current choice of environment. For local Docker work, inspect Docker Desktop and its running engine before choosing a test host. Treat prior VM and QEMU records as historical; if an acceptance criterion conflicts with the user's chosen host, surface the conflict before changing hosts.
+- Use Docker Desktop on Windows for local development and validation; inspect the running engine and use isolated test data. Prior VM and QEMU records are historical. Do not request or start the old VM for this project; if a ticket requires it, reconcile the ticket with the current Docker environment.
 - Before implementing or running a host worker, inspect its entry point and check that its operating-system APIs, Docker CLI, and runtime version work on the chosen host. Report any unsupported configuration before attempting a consequential action.
 
 ## Complete and verify

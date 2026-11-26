@@ -1,0 +1,18 @@
+# Issue 28: Docker Desktop validation evidence
+
+Date: 2026-11-25. Tested checkout: `2403ab5bf8d07aa97b89770bc8d418b478b42b30` (clean before this record). Host: Windows, Docker Desktop Linux x86_64, Engine 29.9.3, runc 1.5.3, containerd 2.4.2. The skill worker image was built from this checkout as `superharry-issue28-test:local`. The existing `superharry-skill-network-test:local` image's three worker source files matched the checkout by SHA-256.
+
+These checks use synthetic inputs, temporary databases and spools, controlled HTTP destinations, and Django's test client. They do not change or validate the installed service or its database, or establish a live provider result.
+
+| Check | Command (PowerShell; from repository root) | Result |
+| --- | --- | --- |
+| Sandbox | `$env:SKILL_TEST_IMAGE='superharry-issue28-test:local'; .venv/Scripts/python.exe -m tests.skill_sandbox_smoke` | Passed. Checks unprivileged execution, missing application data, secrets and Docker socket, network denial, configured cgroup limits, read-only root, bounded output, failure, timeout and removal of test containers. |
+| Preparation and ownership | `$env:SKILL_TEST_IMAGE='superharry-issue28-test:local'; .venv/Scripts/python.exe -m tests.skill_preparation_smoke` | Passed with disposable SQLite and a synthetic wheel; includes preparation failure, retry, execution, and another user's denied access. |
+| Mediated network | `.venv/Scripts/python.exe -m tests.skill_network_sandbox_smoke` | Exit 0. Runs real isolated containers against controlled destinations and package mediation. |
+| Chat and CSV | `$env:DJANGO_SETTINGS_MODULE='superharry.settings'; $env:DJANGO_SECRET_KEY='issue28-test-only'; $env:SKILL_NETWORK_DOCKER_SMOKE='1'; $env:SKILL_TEST_IMAGE='superharry-issue28-test:local'; .venv/Scripts/python.exe -m django test tests.test_agent_skill_docker --verbosity 1` | 2 passed. Includes explicit CSV request, result ownership and attachment without automatic processing, using a controlled gateway. |
+| Lifecycle and approvals | `$env:DJANGO_SETTINGS_MODULE='superharry.settings'; $env:DJANGO_SECRET_KEY='issue28-test-only'; $env:SKILL_NETWORK_DOCKER_SMOKE='1'; .venv/Scripts/python.exe -m django test tests.test_skill_network_docker tests.test_skill_network_approval --verbosity 1` | 19 passed. Covers owner approval, updates and restarts, deletion notification, and preventing automatic repetition after external activity; approval-only tests use controlled application boundaries. |
+| Docker Desktop spool | `$env:SKILL_TEST_IMAGE='superharry-issue28-test:local'; .venv/Scripts/python.exe -m tests.skill_desktop_smoke` | Passed with disposable Django container, temporary SQLite and spool. Covers preparation, execution, owner approval and a running skill update across the host/container boundary. |
+
+Additional probes through `scripts.skill_sandbox.run_skill` used the same worker image and a fresh UUID per job. A script allocating `bytearray(256 * 1024 * 1024)` failed during execution under the 128 MiB limit. A script attempting to start 80 `sleep 10` processes caught `OSError`, printed `process limit enforced`, and terminated and reaped its children. The sandbox smoke separately read the CPU quota, memory and process limits from cgroup files and verified timeout and output limits; it did not measure CPU throughput.
+
+On 2026-11-25 the owner explicitly replaced the issue's dedicated VM requirement with Docker Desktop validation and directed that the old VM not be requested or started for this project. An earlier attempt to start it failed because its backing file was missing; no VM evidence was obtained. No new tests were written, so no red-green implementation cycle is claimed.

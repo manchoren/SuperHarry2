@@ -12,7 +12,7 @@ At staging, Git normalized line endings in `superharry/chat.py`, `superharry/sch
 - `python -m django makemigrations --check --dry-run` with the synthetic Django settings above: no changes detected.
 - Docker Desktop Engine 29.9.3, runc 1.5.3, containerd 2.4.2. Test worker image ID: `sha256:5da2f3a435b2a8d603df830585c820bc98591628e6b08faacd56fd34daa07980`.
 
-The checks cover updated and deleted active jobs, original input, changed dependencies, pending and already-performed external actions without automatic repetition, owner-only notices and retained results, concurrent edit/delete/execution, database contention, interrupted publication and worker recovery, invalid controls, and legacy jobs with unknown action history. The current deployment was not changed. Dedicated Linux VM acceptance remains separately tracked in #28.
+The checks cover updated and deleted active jobs, original input, changed dependencies, pending and already-performed external actions without automatic repetition, owner-only notices and retained results, concurrent edit/delete/execution, database contention, interrupted publication and worker recovery, invalid controls, and legacy jobs with unknown action history. The current deployment was not changed. Subsequent Docker Desktop validation is recorded in [issue #28 evidence](issue-28-docker-evidence.md).
 
 ## Changed-file SHA-256 manifest
 
