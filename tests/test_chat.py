@@ -15,9 +15,20 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
+from superharry.soul import guidance
 
 
 class ChatTests(TestCase):
+    def test_soul_guidance_is_sent_and_visible_read_only(self):
+        response = self.client.post('/chat/send/', {'message': 'Hello'})
+        list(response.streaming_content)
+        self.assertEqual(self.requests[-1][2]['messages'][0], {'role': 'system', 'content': guidance()})
+        page = self.client.get('/settings/')
+        self.assertContains(page, 'Agent guidance')
+        self.assertContains(page, 'Respect user privacy')
+        self.assertEqual(self.client.post('/settings/', {'soul': 'changed'}).status_code, 405)
+        self.assertRedirects(Client().get('/settings/'), '/login/?next=/settings/')
+
     def test_explicit_csv_request_queues_the_selected_owned_file(self):
         from superharry.models import ChatInput, SkillRun
         item = ChatInput.objects.create(owner=self.user, name="sales.csv", media_type="text/plain", payload=b"name,amount\nA,4\n")
@@ -768,7 +779,7 @@ class ChatTests(TestCase):
             call_command("run_schedules", stdout=StringIO())
         outbound = self.requests[-1][2]
         self.assertEqual(outbound["messages"][-1], {"role": "user", "content": "First draft notes"})
-        self.assertIn("Summarize the user", outbound["messages"][0]["content"])
+        self.assertIn("Summarize the user", outbound["messages"][1]["content"])
         self.assertContains(self.client.get(response["Location"]), "Hello there")
 
     def test_model_creates_one_time_schedule_from_chat(self):
@@ -870,7 +881,7 @@ class ChatTests(TestCase):
             {
                 "model": "test/free-model",
                 "stream": True,
-                "messages": [{"role": "user", "content": "Hi"}],
+                "messages": [{"role": "system", "content": guidance()}, {"role": "user", "content": "Hi"}],
             },
         )])
 
@@ -889,7 +900,7 @@ class ChatTests(TestCase):
             f"/chat/{conversation_id}/send/", {"message": "Follow-up"}
         )
         list(second.streaming_content)
-        self.assertEqual(self.requests[-1][2]["messages"], [
+        self.assertEqual(self.requests[-1][2]["messages"][1:], [
             {"role": "user", "content": "First question"},
             {"role": "assistant", "content": "Hello there"},
             {"role": "user", "content": "Follow-up"},
@@ -956,7 +967,7 @@ class ChatTests(TestCase):
         outbound = self.requests[-1][2]
         self.assertNotIn("tools", outbound)
         self.assertEqual(outbound["messages"][-1], {"role": "user", "content": "First draft notes"})
-        self.assertIn("Summarize the user", outbound["messages"][0]["content"])
+        self.assertIn("Summarize the user", outbound["messages"][1]["content"])
         history = self.client.get(response["Location"])
         self.assertContains(history, "/summarize First draft notes")
         self.assertContains(history, "Hello there")

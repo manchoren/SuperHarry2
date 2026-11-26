@@ -7,6 +7,7 @@
     <a href="{% url 'schedules' %}">Schedules</a>
     <a href="{% url 'memories' %}">Saved memories</a>
     <a href="{% url 'skills' %}">Skills</a>
+    <a href="{% url 'account-settings' %}">Settings</a>
     {% if has_previous_csv_results %}<a href="{% url 'csv-upload' %}">Previous CSV results</a>{% endif %}
   </nav>
   {% if show_conversations %}

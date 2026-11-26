@@ -24,6 +24,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY superharry/ superharry/
+COPY SOUL.md SOUL.md
 COPY scripts/ scripts/
 COPY tests/ tests/
 RUN DJANGO_SECRET_KEY=build-only python -m django collectstatic --noinput
