@@ -31,7 +31,7 @@ jobs:
           python-version: '3.13'
           cache: pip
       - name: Install test dependencies
-        run: python -m pip install -r requirements.txt ruff==0.14.7
+        run: python -m pip install -r requirements-dev.txt
       - name: Check changed lines for whitespace errors
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
@@ -90,6 +90,7 @@ jobs:
       - name: Build isolated worker image
         run: |
           docker build --target skill-worker -t superharry-skill-worker:local .
+          docker tag superharry-skill-worker:local superharry-skill-network-test:local
       - name: Check CSV skill through chat
         env:
           SKILL_NETWORK_DOCKER_SMOKE: '1'
@@ -98,3 +99,9 @@ jobs:
         run: python -m tests.skill_sandbox_smoke
       - name: Check skill preparation and execution
         run: python -m tests.skill_preparation_smoke
+      - name: Check mediated skill network
+        run: python -m tests.skill_network_sandbox_smoke
+      - name: Check skill network integration
+        env:
+          SKILL_NETWORK_DOCKER_SMOKE: '1'
+        run: python -m django test tests.test_skill_network_docker --verbosity 1

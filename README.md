@@ -13,3 +13,21 @@ To provision Django and a private OmniRoute gateway, set the provider variables 
 For an existing provisioned installation, run `python scripts/deploy.py` to deploy the current checkout, or `python scripts/deploy.py --watch` to redeploy after application changes.
 
 In Django admin, the recovery superuser can create users and delegate regular account management. To delegate, enable `Staff status` on the user and add them to the `Administrators` group. Group membership and privilege grants are managed by the superuser.
+
+## Development checks
+
+Install the pinned development dependencies and run the same undefined-name check as CI. On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe -m ruff check --select F821,F822,F823 .
+```
+
+On Linux:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m ruff check --select F821,F822,F823 .
+```

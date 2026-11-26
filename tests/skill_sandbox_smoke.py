@@ -75,6 +75,36 @@ print('isolated')
 """
     result = run_skill({"files": {"probe.py": probe}, "entrypoint": "probe.py", "input": ""})
     assert result == {"status": "complete", "output": "isolated\n"}, result
+    # The cgroup values alone do not prove that the runtime enforces them.
+    result = run_skill({
+        "files": {"memory.py": "data = bytearray(16 * 1024 * 1024)\nprint('allocation succeeded')"},
+        "entrypoint": "memory.py", "input": "",
+    })
+    assert result == {"status": "complete", "output": "allocation succeeded\n"}, result
+    result = run_skill({
+        "files": {"memory.py": "data = bytearray(256 * 1024 * 1024)\nprint('allocation succeeded')"},
+        "entrypoint": "memory.py", "input": "",
+    })
+    assert result == {"status": "failed", "stage": "execution", "reason": "execution_failed"}, result
+    process_probe = """import errno, subprocess
+children = []
+try:
+    for _ in range(80):
+        children.append(subprocess.Popen(['sleep', '30']))
+except OSError as error:
+    if error.errno != errno.EAGAIN or not children:
+        raise
+    print('process limit enforced')
+else:
+    raise RuntimeError('process limit was not enforced')
+finally:
+    for child in children:
+        child.terminate()
+    for child in children:
+        child.wait()
+"""
+    result = run_skill({"files": {"processes.py": process_probe}, "entrypoint": "processes.py", "input": ""})
+    assert result == {"status": "complete", "output": "process limit enforced\n"}, result
     result = run_skill({"files": {"fail.py": "raise ValueError()"}, "entrypoint": "fail.py", "input": ""})
     assert result["status"] == "failed", result
     result = run_skill({"files": {"flood.py": "print('x' * 20000)"}, "entrypoint": "flood.py", "input": ""})
