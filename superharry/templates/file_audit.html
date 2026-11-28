@@ -3,6 +3,28 @@
 {% block content %}
 <h1>Administrative file access audit</h1>
 <p><a href="{% url 'file-history' %}">Back to file history</a></p>
-<ul>{% for entry in page %}<li>{{ entry.occurred_at }} — {{ entry.actor.username|default:"Deleted user" }} — {{ entry.action }} — {{ entry.file_kind }} #{{ entry.file_id }} {{ entry.file_name }} — owner {{ entry.owner.username|default:"Deleted user" }}</li>{% empty %}<li>No recorded access.</li>{% endfor %}</ul>
-<nav aria-label="Audit pages">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous</a>{% endif %} Page {{ page.number }} of {{ page.paginator.num_pages }} {% if page.has_next %}<a href="?page={{ page.next_page_number }}">Next</a>{% endif %}</nav>
+<div class="listing-table-scroll" role="region" aria-label="File access audit" tabindex="0">
+  <table class="listing-table">
+    <caption class="visually-hidden">Administrative file access records</caption>
+    <thead><tr><th scope="col">Time</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">File</th><th scope="col">Owner</th></tr></thead>
+    <tbody>
+      {% for entry in page %}
+        <tr>
+          <td data-label="Time"><time datetime="{{ entry.occurred_at|date:'c' }}">{{ entry.occurred_at }}</time></td>
+          <td data-label="Actor">{{ entry.actor.username|default:entry.actor_username|default:"Deleted user" }}</td>
+          <td data-label="Action">{{ entry.action }}</td>
+          <td data-label="File">{{ entry.file_kind|title }} #{{ entry.file_id }}{% if entry.file_name %}: {{ entry.file_name }}{% else %}: Removed file{% endif %}</td>
+          <td data-label="Owner">{{ entry.owner.username|default:entry.owner_username|default:"Deleted user" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td class="listing-empty" colspan="5">No recorded access.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<nav class="listing-pagination" aria-label="Audit pages">
+  {% if page.has_previous %}<a class="listing-action" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+  <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="listing-action" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+</nav>
 {% endblock %}

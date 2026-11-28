@@ -1,0 +1,52 @@
+{% extends 'memories/base.html' %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+<header class="listing-header">
+  <div>
+    <h1>Accounts</h1>
+    <p class="muted">Find accounts you can manage. Passwords are never shown after they are set.</p>
+  </div>
+  <a class="listing-primary-action" href="{% url 'account-create' %}">{% if request.user.is_superuser %}Create account{% else %}Create regular account{% endif %}</a>
+</header>
+
+<form class="account-filters" method="get" role="search" aria-label="Filter accounts">
+  <label for="account-search">Username or email</label>
+  <input id="account-search" name="q" type="search" value="{{ search }}" autocomplete="off">
+  <label for="account-status">Status</label>
+  <select id="account-status" name="status">
+    <option value="">All statuses</option>
+    <option value="active"{% if status_filter == 'active' %} selected{% endif %}>Active</option>
+    <option value="inactive"{% if status_filter == 'inactive' %} selected{% endif %}>Inactive</option>
+  </select>
+  <label for="account-role">Role</label>
+  <select id="account-role" name="role">
+    <option value="">All permitted roles</option>
+    <option value="regular"{% if role_filter == 'regular' %} selected{% endif %}>Regular</option>
+    {% if can_filter_admins %}<option value="administrator"{% if role_filter == 'administrator' %} selected{% endif %}>Administrator</option>{% endif %}
+  </select>
+  <button class="listing-action" type="submit">Apply filters</button>
+  {% if search or status_filter or role_filter %}<a class="listing-action" href="{% url 'account-list' %}">Clear filters</a>{% endif %}
+</form>
+
+<div class="listing-table-scroll" role="region" aria-label="Accounts" tabindex="0">
+  <table class="listing-table">
+    <thead><tr><th scope="col">Username</th><th scope="col">Name and email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+    <tbody>
+      {% for account in accounts %}
+        <tr>
+          <th scope="row" data-label="Username"><a class="listing-detail-link" href="{% url 'account-detail' account.pk %}">{{ account.username }}</a></th>
+          <td data-label="Name and email">{{ account.get_full_name|default:"—" }}{% if account.email %}<br><span class="muted">{{ account.email }}</span>{% endif %}</td>
+          <td data-label="Role">{% if account.is_staff or account.is_superuser or account.groups.exists or account.user_permissions.exists %}Administrator{% else %}Regular{% endif %}</td>
+          <td data-label="Status"><span class="listing-status">{% if account.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+          <td class="listing-actions" data-label="Actions">
+            <a class="listing-action" href="{% url 'account-detail' account.pk %}">View</a>
+            {% if request.user.is_superuser or not account.is_staff and not account.is_superuser and not account.groups.exists and not account.user_permissions.exists %}<a class="listing-action" href="{% url 'account-edit' account.pk %}">Edit</a>{% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td class="listing-empty" colspan="5">No accounts match these filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

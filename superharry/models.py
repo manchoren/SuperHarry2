@@ -9,6 +9,9 @@ from django.utils import timezone
 class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     avatar = models.BinaryField(null=True, blank=True)
+    must_change_password = models.BooleanField(default=False)
+    deletion_pending = models.BooleanField(default=False)
+    deletion_stop_confirmed = models.BooleanField(default=False)
 
 
 class Conversation(models.Model):
@@ -79,6 +82,9 @@ class SkillPreparation(models.Model):
     job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     fingerprint = models.CharField(max_length=64)
     payload = models.JSONField()
+    lifecycle = models.CharField(max_length=16, blank=True, default="")
+    lifecycle_generation = models.PositiveIntegerField(default=0)
+    lifecycle_uncertain = models.BooleanField(default=False)
 
 
 class SkillRun(models.Model):
@@ -131,10 +137,39 @@ class ArtifactDelivery(models.Model):
 class FileAccessAudit(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="file_audit_actions")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="file_audit_subjects")
+    actor_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    actor_username = models.CharField(max_length=150, blank=True, default="")
+    actor_is_privileged = models.BooleanField(default=False)
+    owner_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    owner_username = models.CharField(max_length=150, blank=True, default="")
+    owner_is_privileged = models.BooleanField(default=False)
     action = models.CharField(max_length=16)
     file_kind = models.CharField(max_length=16)
     file_id = models.PositiveBigIntegerField()
     file_name = models.CharField(max_length=255)
+    occurred_at = models.DateTimeField(default=timezone.now)
+
+
+class AccountAudit(models.Model):
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="account_audit_actions",
+    )
+    target = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="account_audit_events",
+    )
+    actor_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    actor_username = models.CharField(max_length=150, blank=True, default="")
+    actor_is_privileged = models.BooleanField(default=False)
+    target_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    target_username = models.CharField(max_length=150)
+    target_is_privileged = models.BooleanField(default=False)
+    action = models.CharField(max_length=24)
     occurred_at = models.DateTimeField(default=timezone.now)
 
 
@@ -188,6 +223,7 @@ class Message(models.Model):
     role = models.CharField(max_length=9, choices=Role)
     content = models.TextField()
     selected_skill = models.CharField(max_length=48, blank=True, default="")
+    selected_skills = models.JSONField(default=list, blank=True)
     complete = models.BooleanField(default=True)
     in_progress = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -215,6 +251,8 @@ class ChatSubmission(models.Model):
     fingerprint = models.CharField(max_length=64)
     active = models.BooleanField(default=True)
     submitted_day = models.DateField(null=True)
+    cancel_requested_at = models.DateTimeField(null=True, blank=True)
+    cancellation_confirmed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=("owner", "submitted_day"))]
@@ -244,6 +282,8 @@ class Schedule(models.Model):
     created_by = models.ForeignKey("ScheduleOccurrence", null=True, blank=True, on_delete=models.SET_NULL, related_name="children")
     preferred_model = models.CharField(max_length=255, blank=True)
     canceled = models.BooleanField(default=False)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    paused_next_run = models.DateTimeField(null=True, blank=True)
 
     @property
     def local_next_run(self):

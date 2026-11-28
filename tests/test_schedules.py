@@ -75,6 +75,97 @@ class SchedulerTests(TestCase):
         self.assertNotContains(page, "Private other task")
         self.assertContains(page, "Cancel schedule")
 
+    def test_schedule_menu_is_a_table_with_summary_state_and_relevant_columns(self):
+        from superharry.models import Schedule, ScheduleOccurrence
+
+        owner = get_user_model().objects.create_user(username="table-owner")
+        conversation = Conversation.objects.create(owner=owner, title="Operations")
+        prompt = "Review the daily report and identify any unusual changes. " * 4
+        schedule = Schedule.objects.create(
+            owner=owner,
+            conversation=conversation,
+            prompt=prompt,
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC",
+            repetition="daily",
+            preferred_model="test/model",
+        )
+        ScheduleOccurrence.objects.create(
+            schedule=schedule,
+            due_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            status="complete",
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get("/schedules/")
+
+        self.assertEqual(response.status_code, 200)
+        for heading in ("Task", "Prompt", "Conversation", "Status", "Next execution", "Latest outcome", "Preferred model", "Actions"):
+            self.assertContains(response, heading)
+        self.assertContains(response, "<table", html=False)
+        self.assertContains(response, "Scheduled")
+        self.assertContains(response, "complete")
+        self.assertContains(response, "test/model")
+        self.assertContains(response, "/schedules/%s/" % schedule.pk)
+        self.assertContains(response, prompt[:100])
+        self.assertNotContains(response, prompt)
+
+    def test_schedule_detail_shows_full_prompt_context_and_permitted_actions(self):
+        from superharry.models import Schedule, ScheduleOccurrence
+
+        owner = get_user_model().objects.create_user(username="detail-owner")
+        conversation = Conversation.objects.create(owner=owner, title="Planning")
+        prompt = "Full schedule prompt with details that must be available on its detail page."
+        schedule = Schedule.objects.create(
+            owner=owner,
+            conversation=conversation,
+            prompt=prompt,
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC",
+            repetition="weekly",
+            wall_time=time(12),
+            weekday=2,
+            preferred_model="test/model",
+        )
+        ScheduleOccurrence.objects.create(
+            schedule=schedule,
+            due_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            status="complete",
+            failure_reason="Synthetic outcome details",
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(f"/schedules/{schedule.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, prompt)
+        self.assertContains(response, "Planning")
+        self.assertContains(response, "Weekly")
+        self.assertContains(response, "test/model")
+        self.assertContains(response, "Synthetic outcome details")
+        self.assertContains(response, "Save model")
+        self.assertContains(response, "Cancel schedule")
+
+    def test_schedule_detail_hides_another_users_schedule(self):
+        from superharry.models import Schedule
+
+        owner = get_user_model().objects.create_user(username="schedule-owner")
+        other = get_user_model().objects.create_user(username="schedule-other")
+        conversation = Conversation.objects.create(owner=owner, title="Private")
+        schedule = Schedule.objects.create(
+            owner=owner,
+            conversation=conversation,
+            prompt="Private schedule prompt",
+            next_run=datetime(2099, 1, 1, 12, tzinfo=timezone.utc),
+            timezone="UTC",
+            repetition="once",
+        )
+        self.client.force_login(other)
+
+        response = self.client.get(f"/schedules/{schedule.pk}/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_restart_advances_recurring_schedule_after_a_completed_occurrence(self):
         from superharry.models import Schedule, ScheduleOccurrence
 
@@ -270,7 +361,7 @@ class SchedulerTests(TestCase):
         self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Finished.")
 
     def test_restart_keeps_partial_submitted_reply_without_resubmitting(self):
-        from superharry.models import ChatSubmission, Message, Schedule, ScheduleOccurrence
+        from superharry.models import ChatSubmission, Schedule, ScheduleOccurrence
 
         owner = get_user_model().objects.create_user(username="owner")
         conversation = Conversation.objects.create(owner=owner, title="Follow up")

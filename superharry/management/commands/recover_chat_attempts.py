@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from superharry.models import ChatSubmission, Message, ScheduleOccurrence
 from superharry.scheduler import occurrence_key
@@ -18,3 +19,7 @@ class Command(BaseCommand):
                 in_progress=False, complete=False
             )
             ChatSubmission.objects.filter(active=True).exclude(key__in=keys).exclude(reply_id__in=reply_ids).update(active=False)
+            ChatSubmission.objects.filter(
+                cancel_requested_at__isnull=False,
+                cancellation_confirmed_at__isnull=True,
+            ).update(active=False, cancellation_confirmed_at=timezone.now())

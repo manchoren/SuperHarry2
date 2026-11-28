@@ -21,7 +21,38 @@ class SavedMemoryTests(TestCase):
     def test_user_can_save_and_inspect_a_memory(self):
         response = self.post_form("/memories/new/", content="I prefer concise summaries.")
         self.assertRedirects(response, "/memories/")
-        self.assertContains(self.browser.get("/memories/"), "I prefer concise summaries.")
+        listing = self.browser.get("/memories/")
+        self.assertContains(listing, "I prefer concise summaries.")
+        self.assertContains(listing, "<table", html=False)
+        self.assertContains(listing, "View memory")
+
+    def test_memory_detail_shows_complete_content_and_existing_actions(self):
+        content = "A detailed note. " * 29 + "Last note."
+        self.post_form("/memories/new/", content=content)
+        memory_id = self.user.savedmemory_set.get().pk
+
+        detail = self.browser.get(f"/memories/{memory_id}/")
+
+        self.assertContains(detail, content)
+        self.assertContains(detail, "Edit")
+        self.assertContains(detail, "Delete")
+
+    def test_other_accounts_cannot_view_a_memory_detail(self):
+        self.post_form("/memories/new/", content="Unshared preference")
+        memory_id = self.user.savedmemory_set.get().pk
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="memory-detail-other"))
+
+        self.assertEqual(other.get(f"/memories/{memory_id}/").status_code, 404)
+
+    def test_memory_list_summarizes_long_content_and_links_to_detail(self):
+        content = "Long private memory. " * 30
+        self.post_form("/memories/new/", content=content)
+        listing = self.browser.get("/memories/")
+        memory_id = self.user.savedmemory_set.get().pk
+
+        self.assertContains(listing, f'href="/memories/{memory_id}/"')
+        self.assertNotContains(listing, content)
 
     def saved_memory_link(self, action):
         page = self.browser.get("/memories/")

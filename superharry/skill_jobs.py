@@ -11,7 +11,10 @@ from django.db import DatabaseError, connection, transaction
 from django.db.models import F
 from django.utils import timezone
 
+from . import browser_handoff
 from .csv_protocol import publish, read_limited
+from .account_state import lock_active_account
+from .browser_tasks import consent_is_current, consent_path, validate_browser_url
 from .models import ArtifactDelivery, ArtifactGroup, SkillArtifact, SkillOutbox, SkillPreparation, SkillRun
 
 
@@ -81,6 +84,30 @@ def dispatch_one(job_id):
             job = SkillOutbox.objects.select_for_update().filter(job_id=job_id, state="publishing").first()
             if job is None:
                 return False
+            owner_id = (
+                job.preparation.skill.owner_id
+                if job.preparation_id is not None
+                else job.requested_by_id
+            )
+            if not lock_active_account(owner_id):
+                lifecycle_model = SkillRun if job.execution_id is not None else SkillPreparation
+                lifecycle_job = lifecycle_model.objects.select_for_update().filter(pk=job.execution_id if job.execution_id is not None else job.preparation_id).first()
+                if lifecycle_job is not None:
+                    lifecycle_job.lifecycle = "cancelled"
+                    lifecycle_job.lifecycle_generation += 1
+                    if isinstance(lifecycle_job, SkillRun):
+                        lifecycle_job.lifecycle_uncertain = lifecycle_job.lifecycle_uncertain or (
+                            directory / f"{job_id}.skill-external"
+                        ).exists()
+                        lifecycle_job.save(update_fields=("lifecycle", "lifecycle_generation", "lifecycle_uncertain"))
+                    else:
+                        lifecycle_job.save(update_fields=("lifecycle", "lifecycle_generation"))
+                    transaction.on_commit(
+                        lambda identifier=job_id, is_preparation=isinstance(lifecycle_job, SkillPreparation):
+                        dispatch_lifecycle(identifier, preparation=is_preparation)
+                    )
+                job.delete()
+                return False
             if any((directory / f"{job_id}.{suffix}").exists()
                    for suffix in ("skill-input", "skill-running", "skill-result")):
                 job.delete()
@@ -98,6 +125,55 @@ def dispatch_one(job_id):
                         publish(directory / f"{job_id}.skill-result", b'{"status":"failed","reason":"skill_removed"}', replace=False)
                     job.delete()
                     return False
+            if job.execution_id is not None and owner_job.skill_name == "playwright":
+                payload = job.payload
+                search_task = isinstance(payload, dict) and payload.get("search_task") is True
+                base_keys = {"runtime", "search_task", "_browser_owner_id", "_browser_consent_token",
+                             "browser_session", "browser_handoff"} if search_task else {
+                    "runtime", "target_url", "_browser_owner_id", "_browser_consent_token",
+                    "browser_session", "browser_handoff",
+                }
+                action_keys = {"action_request", "action_route_id"}
+                continuation_keys = {"continue_with_model"}
+                expected_payloads = {frozenset(base_keys)}
+                if not search_task:
+                    expected_payloads.update((frozenset(base_keys | continuation_keys),
+                                              frozenset(base_keys | action_keys),
+                                              frozenset(base_keys | action_keys | continuation_keys)))
+                valid_browser_task = (
+                    isinstance(payload, dict)
+                    and frozenset(payload) in expected_payloads
+                    and payload.get("runtime") == "playwright-browser"
+                    and (not search_task or payload.get("browser_handoff") is False)
+                    and payload.get("browser_session") is True
+                    and type(payload.get("browser_handoff")) is bool
+                    and ("continue_with_model" not in payload or type(payload.get("continue_with_model")) is bool)
+                    and (not payload.get("continue_with_model") or payload.get("browser_handoff") is True)
+                    and (not action_keys.issubset(payload) or (
+                        payload.get("browser_handoff") is True
+                        and isinstance(payload.get("action_request"), str)
+                        and 1 <= len(payload["action_request"]) <= 1000
+                        and isinstance(payload.get("action_route_id"), str)
+                        and 1 <= len(payload["action_route_id"]) <= 255
+                    ))
+                    and payload.get("_browser_owner_id") == job.requested_by_id == owner_job.owner_id
+                    and consent_is_current(
+                        directory, job_id, job.requested_by_id, payload.get("_browser_consent_token")
+                    )
+                )
+                try:
+                    if valid_browser_task and search_task:
+                        from .search_providers import validate_search_query
+                        validate_search_query(owner_job.execution_payload.get("search_query"))
+                    elif valid_browser_task:
+                        validate_browser_url(payload["target_url"])
+                except (TypeError, ValueError):
+                    valid_browser_task = False
+                if not valid_browser_task:
+                    job.delete()
+                    consent_path(directory, job_id).unlink(missing_ok=True)
+                    publish(directory / f"{job_id}.skill-result", b'{"status":"failed","reason":"browser_consent_invalid"}', replace=False)
+                    return False
             if not claimed:
                 return False
             enqueue(directory, job_id, job.payload)
@@ -112,36 +188,44 @@ def dispatch_pending():
     delivered = sum(dispatch_one(job_id) for job_id in ids)
     for job_id in SkillRun.objects.exclude(lifecycle="").values_list("job_id", flat=True):
         dispatch_lifecycle(job_id)
+    for job_id in SkillPreparation.objects.exclude(lifecycle="").values_list("job_id", flat=True):
+        dispatch_lifecycle(job_id, preparation=True)
     return delivered
 
 
-def dispatch_lifecycle(job_id):
+def dispatch_lifecycle(job_id, *, preparation=False):
     directory = spool()
     if directory is None or connection.in_atomic_block:
         return False
+    lifecycle_model = SkillPreparation if preparation else SkillRun
     try:
         with transaction.atomic():
-            if not SkillRun.objects.filter(job_id=job_id).exclude(lifecycle="").update(lifecycle=F("lifecycle")):
+            if not lifecycle_model.objects.filter(job_id=job_id).exclude(lifecycle="").update(lifecycle=F("lifecycle")):
                 return False
-            run = SkillRun.objects.get(job_id=job_id)
+            lifecycle_job = lifecycle_model.objects.get(job_id=job_id)
+            if (not preparation and lifecycle_job.skill_name == "playwright"
+                    and lifecycle_job.execution_payload.get("browser_handoff") is True):
+                browser_handoff.clear(job_id)
             outcome = result(directory, job_id)
-            if outcome and outcome.get("generation", 0) >= run.lifecycle_generation:
+            if outcome and outcome.get("generation", 0) >= lifecycle_job.lifecycle_generation:
                 return True
             for suffix in ("skill-control", "skill-applying", "skill-input", "skill-running"):
                 try:
                     queued = json.loads(read_limited(directory / f"{job_id}.{suffix}", MAX_JOB_BYTES))
                     generation = queued.get("generation", 0) if suffix in ("skill-control", "skill-applying") else queued.get("_lifecycle_generation", 0)
-                    if generation >= run.lifecycle_generation:
+                    if generation >= lifecycle_job.lifecycle_generation:
                         return True
                 except (OSError, ValueError, AttributeError, TypeError):
                     continue
             outcome = result(directory, job_id)
-            if outcome and outcome.get("generation", 0) >= run.lifecycle_generation:
+            if outcome and outcome.get("generation", 0) >= lifecycle_job.lifecycle_generation:
                 return True
-            control = {"action": run.lifecycle, "generation": run.lifecycle_generation}
-            if run.lifecycle == "updated":
-                control["payload"] = run.execution_payload
-                control["uncertain"] = run.lifecycle_uncertain
+            control = {"action": lifecycle_job.lifecycle, "generation": lifecycle_job.lifecycle_generation}
+            if lifecycle_job.lifecycle == "updated":
+                control["payload"] = lifecycle_job.execution_payload
+                control["uncertain"] = lifecycle_job.lifecycle_uncertain
+            elif lifecycle_job.lifecycle == "cancelled":
+                control["uncertain"] = getattr(lifecycle_job, "lifecycle_uncertain", False)
             publish(directory / f"{job_id}.skill-control", json.dumps(control, ensure_ascii=True).encode("ascii"), replace=True)
             return True
     except (OSError, ValueError, DatabaseError):
@@ -183,11 +267,33 @@ def run_result(directory, run):
     outcome = result(directory, run.job_id)
     if outcome and run.lifecycle and outcome.get("generation", 0) < run.lifecycle_generation:
         return None
-    if outcome and not run.artifacts_imported:
+    if run.execution_payload.get("browser_handoff") is True:
+        if directory is not None:
+            discard_artifact_spool(directory / f"{run.job_id}.skill-artifacts")
+        if not run.artifacts_imported:
+            SkillRun.objects.filter(pk=run.pk, artifacts_imported=False).update(artifacts_imported=True)
+            run.artifacts_imported = True
+        return outcome
+    if outcome and not run.artifacts_imported and not _browser_session_is_active(directory, run):
         import_artifacts(directory, run, outcome)
     elif outcome and run.artifacts_imported and directory is not None:
         discard_artifact_spool(directory / f"{run.job_id}.skill-artifacts")
     return outcome
+
+
+def _browser_session_is_active(directory, run):
+    if (directory is None or run.skill_name != "playwright" or not run.repository_skill):
+        return False
+    try:
+        request = json.loads(read_limited(directory / f"{run.job_id}.skill-running", MAX_JOB_BYTES))
+    except (OSError, ValueError):
+        return False
+    return bool(
+        isinstance(request, dict) and request.get("runtime") == "playwright-browser"
+        and request.get("browser_session") is True and type(request.get("browser_handoff")) is bool
+        and request.get("_browser_owner_id") == run.owner_id
+        and consent_is_current(directory, run.job_id, run.owner_id, request.get("_browser_consent_token"))
+    )
 
 
 def discard_artifact_spool(path):

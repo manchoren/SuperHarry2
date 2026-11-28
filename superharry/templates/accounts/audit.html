@@ -1,0 +1,45 @@
+{% extends 'memories/base.html' %}
+{% block title %}Account audit{% endblock %}
+{% block content %}
+<header class="listing-header">
+  <div>
+    <h1>Account audit</h1>
+    <p class="muted">Account-management actions only. This history does not include passwords or private account content.</p>
+  </div>
+</header>
+
+<div class="listing-table-scroll" role="region" aria-label="Account audit events" tabindex="0">
+  <table class="listing-table">
+    <thead>
+      <tr>
+        <th scope="col">Actor</th>
+        <th scope="col">Target</th>
+        <th scope="col">Target role</th>
+        <th scope="col">Action</th>
+        <th scope="col">Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+        <tr>
+          <td data-label="Actor">{{ event.actor_username|default:"Removed account" }}</td>
+          <th scope="row" data-label="Target">{{ event.target_username|default:"Removed account" }}</th>
+          <td data-label="Target role">{% if event.target_is_privileged %}Administrator{% else %}Regular{% endif %}</td>
+          <td data-label="Action">{{ event.action_label }}</td>
+          <td data-label="Time"><time datetime="{{ event.occurred_at|date:'c' }}">{{ event.occurred_at|date:"Y-m-d H:i" }}</time></td>
+        </tr>
+      {% empty %}
+        <tr><td class="listing-empty" colspan="5">No account events are available.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page.paginator.num_pages > 1 %}
+  <nav class="listing-pagination" aria-label="Account audit pages">
+    {% if page.has_previous %}<a class="listing-action" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+    <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="listing-action" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+  </nav>
+{% endif %}
+{% endblock %}

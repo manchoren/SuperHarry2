@@ -7,7 +7,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 
 
 class SkillCatalogTests(TransactionTestCase):
@@ -222,6 +222,40 @@ class SkillCatalogTests(TransactionTestCase):
         self.assertContains(response, "summarize")
         self.assertContains(response, "Summarize pasted text in chat.")
         self.assertContains(response, "Repository")
+        self.assertContains(response, "<table", html=False)
+        self.assertContains(response, "Create a skill draft")
+        self.assertContains(response, "Read-only")
+
+    def test_skill_table_shows_owner_actions_and_preparation_status(self):
+        from superharry.models import VmSkill
+
+        owner = get_user_model().objects.create_user(username="catalog-owner")
+        VmSkill.objects.create(
+            owner=owner, name="catalog-draft", purpose="Build concise reports", instructions="Draft",
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get("/skills/")
+
+        self.assertContains(response, "Build concise reports")
+        self.assertContains(response, "Preparation required")
+        self.assertContains(response, "/skills/catalog-draft/edit/")
+        self.assertContains(response, "/skills/catalog-draft/delete/")
+
+    def test_skill_table_hides_edit_and_delete_for_nonowners(self):
+        from superharry.models import VmSkill
+
+        owner = get_user_model().objects.create_user(username="catalog-private-owner")
+        VmSkill.objects.create(
+            owner=owner, name="private-draft", purpose="Private draft", instructions="Draft",
+        )
+        self.client.force_login(get_user_model().objects.create_user(username="catalog-reader"))
+
+        response = self.client.get("/skills/")
+
+        self.assertContains(response, "private-draft")
+        self.assertNotContains(response, "/skills/private-draft/edit/")
+        self.assertNotContains(response, "/skills/private-draft/delete/")
 
     def test_user_can_inspect_repository_skill_as_read_only(self):
         self.client.force_login(get_user_model().objects.create_user(username="reader"))

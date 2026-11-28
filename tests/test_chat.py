@@ -1,6 +1,8 @@
 import json
 import base64
+import os
 import re
+import unittest
 from collections import deque
 from datetime import datetime, time, timezone
 from io import StringIO
@@ -8,13 +10,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from tempfile import TemporaryDirectory
 from pathlib import Path
+from time import monotonic, sleep
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from superharry.soul import guidance
 
 
@@ -133,8 +136,343 @@ class ChatTests(TestCase):
         list(response.streaming_content)
         self.assertIn('"name": "summarize"', self.requests[-1][2]['messages'][1]['content'])
         self.assertIn('Use it for this request', self.requests[-1][2]['messages'][1]['content'])
-        self.assertContains(self.client.get(response['Location']), 'Skill: summarize')
+        self.assertContains(self.client.get(response['Location']), '/summarize')
         self.assertEqual(self.client.post('/chat/send/', {'message': 'Help', 'selected_skill': 'missing'}).status_code, 400)
+
+    def test_playwright_run_waits_for_owner_approval_and_revokes_consent_on_cancel(self):
+        from superharry.models import SkillOutbox, SkillRun
+
+        args = json.dumps({"name": "playwright", "input": "https://example.com/"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {
+                "message": "Open https://example.com/ and tell me what it says.",
+                "selected_skill": "playwright",
+            })
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+            outbox = SkillOutbox.objects.get(execution=run)
+            self.assertEqual(outbox.state, "awaiting_consent")
+            self.assertEqual(outbox.payload, {"runtime": "playwright-browser", "target_url": "https://example.com/",
+                                              "browser_handoff": False})
+            self.assertEqual(run.execution_payload["target_url"], "https://example.com/")
+            self.assertFalse((Path(directory) / f"{run.job_id}.skill-input").exists())
+            self.assertContains(self.client.get(f"/skill-runs/{run.job_id}/"), "Approve read-only browsing for this task")
+            self.assertContains(self.client.get(f"/skill-runs/{run.job_id}/"), "https://example.com/")
+
+            other_client = Client()
+            other_client.force_login(get_user_model().objects.create_user(username="browser-other"))
+            self.assertEqual(other_client.get(f"/skill-runs/{run.job_id}/").status_code, 404)
+            self.assertEqual(other_client.post(f"/skill-runs/{run.job_id}/browser-decision/", {"decision": "approve"}).status_code, 404)
+
+            with patch("superharry.skill_views.dispatch_one") as dispatch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                        "decision": "approve",
+                    }).status_code, 302)
+                dispatch.assert_called_once_with(run.job_id)
+            outbox.refresh_from_db()
+            self.assertEqual(outbox.state, "pending")
+            self.assertEqual(outbox.payload["_browser_owner_id"], self.user.pk)
+            consent = json.loads((Path(directory) / f"{run.job_id}.browser-consent").read_text(encoding="utf-8"))
+            self.assertEqual(consent["owner_id"], self.user.pk)
+            self.assertEqual(consent["token"], outbox.payload["_browser_consent_token"])
+            self.assertNotIn("token", run.execution_payload)
+
+            self.assertContains(self.client.get(f"/skill-runs/{run.job_id}/"), "Stop this browser task")
+            self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                "decision": "cancel",
+            }).status_code, 302)
+            run.refresh_from_db()
+            self.assertEqual(run.lifecycle, "cancelled")
+            self.assertFalse((Path(directory) / f"{run.job_id}.browser-consent").exists())
+            self.assertFalse(SkillOutbox.objects.filter(job_id=run.job_id).exists())
+            result = json.loads((Path(directory) / f"{run.job_id}.skill-result").read_text(encoding="utf-8"))
+            self.assertEqual(result["reason"], "browser_cancelled")
+
+    def test_agent_prepared_playwright_action_requires_explicit_handoff_and_discloses_scope(self):
+        from superharry.models import SkillOutbox, SkillRun
+
+        action_request = "Set my display name to Ada"
+        args = json.dumps({
+            "name": "playwright", "input": "https://example.com/profile",
+            "action_request": action_request,
+        })
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser-action", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {
+                "message": "Change my profile display name to Ada at https://example.com/profile",
+                "selected_skill": "playwright",
+            })
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+            outbox = SkillOutbox.objects.get(execution=run)
+            approval = self.client.get(f"/skill-runs/{run.job_id}/")
+            self.assertContains(approval, action_request)
+            self.assertContains(approval, "HTTPS browser handoff")
+            self.assertContains(approval, "up to five relevant links with GET in your authenticated session")
+            self.assertContains(approval, "authenticated page text may contain private account information")
+            self.assertContains(approval, "test/free-model")
+            self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                "decision": "approve",
+            }).status_code, 400, "Agent preparation must require explicit HTTPS handoff consent")
+
+            with patch("superharry.skill_views.dispatch_one") as dispatch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                        "decision": "approve", "owner_handoff": "on", "continue_with_model": "on",
+                    }).status_code, 302)
+                dispatch.assert_called_once_with(run.job_id)
+            outbox.refresh_from_db()
+            self.assertEqual(outbox.payload["action_request"], action_request)
+            self.assertEqual(outbox.payload["action_route_id"], "test/free-model")
+            self.assertIs(outbox.payload["browser_handoff"], True)
+            self.assertIs(outbox.payload["continue_with_model"], True)
+            run.refresh_from_db()
+            self.assertEqual(run.execution_payload["action_request"], action_request)
+            self.assertIs(run.execution_payload["continue_with_model"], True)
+            self.assertEqual(run.execution_payload["answer_route_id"], "test/free-model")
+
+    def test_playwright_denial_does_not_dispatch_or_retain_consent(self):
+        from superharry.models import SkillOutbox, SkillRun
+
+        args = json.dumps({"name": "playwright", "input": "https://example.com/"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {
+                "message": "Read the public page https://example.com/", "selected_skill": "playwright",
+            })
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+            self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                "decision": "approve", "continue_with_model": "on",
+            }).status_code, 400, "Authenticated page sharing must also require HTTPS handoff consent")
+            with patch("superharry.skill_views.dispatch_one") as dispatch:
+                self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                    "decision": "deny",
+                }).status_code, 302)
+                dispatch.assert_not_called()
+            self.assertFalse(SkillOutbox.objects.filter(job_id=run.job_id).exists())
+            self.assertFalse((Path(directory) / f"{run.job_id}.browser-consent").exists())
+            self.assertFalse((Path(directory) / f"{run.job_id}.skill-input").exists())
+            result = json.loads((Path(directory) / f"{run.job_id}.skill-result").read_text(encoding="utf-8"))
+            self.assertEqual(result["reason"], "browser_consent_denied")
+
+    def test_playwright_search_requires_approval_and_keeps_query_out_of_worker_spool(self):
+        from superharry.models import SkillOutbox, SkillRun
+
+        query = "public library opening hours"
+        args = json.dumps({"name": "playwright", "input": query})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {
+                "message": f"Search for {query}", "selected_skill": "playwright",
+            })
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+            outbox = SkillOutbox.objects.get(execution=run)
+            self.assertEqual(outbox.state, "awaiting_consent")
+            self.assertEqual(run.execution_payload["search_query"], query)
+            self.assertEqual(outbox.payload["search_query"], query)
+            self.assertFalse((Path(directory) / f"{run.job_id}.skill-input").exists())
+            approval_page = self.client.get(f"/skill-runs/{run.job_id}/")
+            self.assertContains(approval_page, query)
+            self.assertContains(approval_page, "Mwmbl")
+            self.assertContains(approval_page, "CC BY-NC-SA 4.0")
+            with patch("superharry.skill_views.dispatch_one") as dispatch:
+                with self.captureOnCommitCallbacks(execute=True):
+                    approved = self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                        "decision": "approve",
+                    })
+                self.assertEqual(approved.status_code, 302)
+                dispatch.assert_called_once_with(run.job_id)
+            outbox.refresh_from_db()
+            self.assertEqual(outbox.payload["search_task"], True)
+            self.assertNotIn("search_query", outbox.payload)
+            self.assertNotIn("target_urls", outbox.payload)
+            self.assertEqual(run.execution_payload["search_query"], query)
+            self.assertFalse((Path(directory) / f"{run.job_id}.skill-input").exists())
+
+    def _enqueue_approved_search_for_host_tests(self, directory, query):
+        from superharry.models import SkillOutbox, SkillRun
+        from superharry.skill_jobs import enqueue
+
+        args = json.dumps({"name": "playwright", "input": query})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        response = self.client.post("/chat/send/", {
+            "message": f"Search for {query}", "selected_skill": "playwright",
+        })
+        list(response.streaming_content)
+        run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+        outbox = SkillOutbox.objects.get(execution=run)
+        with patch("superharry.skill_views.dispatch_one") as dispatch:
+            with self.captureOnCommitCallbacks(execute=True):
+                approved = self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {"decision": "approve"})
+            self.assertEqual(approved.status_code, 302)
+            dispatch.assert_called_once_with(run.job_id)
+        outbox.refresh_from_db()
+        self.assertEqual(outbox.state, "pending")
+        enqueue(Path(directory), run.job_id, outbox.payload)
+        return run
+
+    def test_approved_search_expiry_before_host_dispatch_prevents_provider_and_browser_calls(self):
+        from superharry.browser_tasks import consent_path
+        from superharry.csv_protocol import read_limited, publish
+        from scripts.run_skill_jobs import process_queue
+        from time import time as current_time
+
+        query = "synthetic expired search"
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            run = self._enqueue_approved_search_for_host_tests(directory, query)
+            consent_file = consent_path(Path(directory), run.job_id)
+            consent = json.loads(read_limited(consent_file, 2048))
+            consent["expires_at"] = current_time() - 1
+            publish(consent_file, json.dumps(consent).encode("ascii"), replace=True)
+            mediator = type("Mediator", (), {"retrieve_browser": lambda *_args, **_kwargs: self.fail("Expired task made a provider or page request")})()
+            with patch("scripts.run_skill_jobs.urllib.request.urlopen") as bridge_request, \
+                    patch("scripts.run_skill_jobs.search_mwmbl_urls") as provider, \
+                    patch("scripts.run_skill_jobs.run_skill") as browser_worker:
+                process_queue(Path(directory), mediator=mediator)
+            bridge_request.assert_not_called()
+            provider.assert_not_called()
+            browser_worker.assert_not_called()
+            result = json.loads(read_limited(Path(directory) / f"{run.job_id}.skill-result", 100 * 1024))
+            self.assertEqual(result["reason"], "browser_consent_expired")
+            self.assertNotIn("citations", result)
+            self.assertNotIn("output", result)
+            self.assertFalse((Path(directory) / f"{run.job_id}.skill-running").exists())
+            run.refresh_from_db()
+            self.assertNotIn("citations", run.execution_payload)
+
+    def test_approved_search_provider_failure_reports_without_synthesis_or_citations(self):
+        from scripts.run_skill_jobs import process_queue
+        from superharry.csv_protocol import read_limited
+
+        query = "synthetic provider failure"
+
+        class UnavailableMwmbl:
+            calls = []
+
+            def retrieve_browser(self, action, *, authorized=None, cancelled=None):
+                self.calls.append(action)
+                if cancelled is not None and cancelled.is_set():
+                    raise PermissionError("Cancelled")
+                if authorized is not None and not authorized():
+                    raise PermissionError("Consent ended")
+                return {"status": 503, "headers": {"content-type": "application/json"},
+                        "body": b'{"error":"synthetic upstream outage"}'}
+
+        mediator = UnavailableMwmbl()
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory), \
+                patch.dict(os.environ, {"MWMBL_SHARED_LEDGER_DIRECTORY": str(Path(directory) / "shared-ledger")}):
+            run = self._enqueue_approved_search_for_host_tests(directory, query)
+            with patch("scripts.run_skill_jobs.read_approved_search_query", return_value=query) as query_reader, \
+                    patch("scripts.run_skill_jobs.run_skill") as browser_worker:
+                process_queue(Path(directory), mediator=mediator)
+            query_reader.assert_called_once()
+            browser_worker.assert_not_called()
+            self.assertEqual(len(mediator.calls), 1)
+            self.assertEqual(mediator.calls[0]["method"], "GET")
+            self.assertIn("q=synthetic+provider+failure", mediator.calls[0]["url"])
+            result = json.loads(read_limited(Path(directory) / f"{run.job_id}.skill-result", 100 * 1024))
+            self.assertEqual(result["reason"], "search_provider_unavailable")
+            self.assertEqual(result["message"], "Mwmbl search returned HTTP 503.")
+            self.assertNotIn("citations", result)
+            self.assertNotIn("output", result)
+            detail = self.client.get(f"/skill-runs/{run.job_id}/")
+            self.assertContains(detail, "Mwmbl search could not run")
+            self.assertContains(detail, "Mwmbl search returned HTTP 503.")
+            self.assertNotContains(detail, "Verified source URLs")
+
+    def test_playwright_result_page_renders_only_the_worker_citations(self):
+        from superharry.models import Conversation, Message, SkillRun
+
+        conversation = Conversation.objects.create(owner=self.user, title="Browser citations")
+        prompt = Message.objects.create(conversation=conversation, role=Message.Role.USER, content="Read page")
+        reply = Message.objects.create(conversation=conversation, prompt=prompt, role=Message.Role.ASSISTANT, content="Task completed.")
+        run = SkillRun.objects.create(
+            owner=self.user, reply=reply, skill_name="playwright", repository_skill=True,
+            execution_payload={"runtime": "playwright-browser", "target_url": "https://public.example/"},
+        )
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            (Path(directory) / f"{run.job_id}.skill-result").write_text(json.dumps({
+                "status": "complete", "output": "A public page.",
+                "citations": ["https://public.example/article"],
+            }), encoding="utf-8")
+            page = self.client.get(f"/skill-runs/{run.job_id}/")
+            self.assertContains(page, "Sources opened")
+            self.assertContains(page, 'href="https://public.example/article"')
+            self.assertNotContains(page, "https://unverified.example/")
+            reply.refresh_from_db()
+            self.assertIn("Read-only browser result", reply.content)
+            self.assertIn("Verified source URLs:\n[1] https://public.example/article", reply.content)
+            self.assertNotIn("unverified.example", reply.content)
+            self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "https://public.example/article")
+
+    def test_skill_mentions_are_deduplicated_persisted_and_sent_without_auto_execution(self):
+        from superharry.models import Message, SkillRun
+        from superharry.chat import skill_mentions_in_text
+
+        prompt_text = "Review /summarize, mention /missing, and remember /summarize."
+        self.assertEqual(skill_mentions_in_text(prompt_text), ["summarize", "missing"])
+        response = self.client.post("/chat/send/", {"message": prompt_text})
+        list(response.streaming_content)
+
+        prompt = Message.objects.get(role=Message.Role.USER)
+        self.assertEqual(prompt.selected_skills, ["summarize", "missing"])
+        messages = self.requests[-1][2]["messages"]
+        mention_context = next(message["content"] for message in messages if "prompt mentions these skills" in message["content"])
+        descriptions = json.loads(mention_context.split("Mentions: ", 1)[1])
+        self.assertEqual([item["name"] for item in descriptions], ["summarize", "missing"])
+        self.assertTrue(descriptions[0]["available"])
+        self.assertIn("instructions", descriptions[0])
+        self.assertFalse(descriptions[1]["available"])
+        self.assertIn("does not by itself authorize or trigger execution", mention_context)
+        self.assertEqual(SkillRun.objects.count(), 0)
+
+        history = self.client.get(response["Location"])
+        self.assertContains(history, 'class="skill-mention"')
+        self.assertContains(history, 'class="skill-mention is-unavailable"')
+        self.assertContains(history, prompt_text)
+
+    def test_retry_preserves_available_and_unavailable_skill_mentions(self):
+        from superharry.models import Message
+
+        self.gateway_responses.append((503, b""))
+        response = self.client.post(
+            "/chat/send/", {"message": "Please consider /summarize and /missing."}
+        )
+        list(response.streaming_content)
+        reply = Message.objects.get(role=Message.Role.ASSISTANT)
+        prompt = reply.prompt
+        self.assertEqual(prompt.selected_skills, ["summarize", "missing"])
+
+        retry = self.client.post(f"/chat/{reply.conversation_id}/retry/{reply.pk}/")
+        list(retry.streaming_content)
+
+        messages = self.requests[-1][2]["messages"]
+        mention_context = next(message["content"] for message in messages if "prompt mentions these skills" in message["content"])
+        descriptions = json.loads(mention_context.split("Mentions: ", 1)[1])
+        self.assertEqual([item["name"] for item in descriptions], ["summarize", "missing"])
+        self.assertEqual(prompt.selected_skills, ["summarize", "missing"])
 
     def test_retry_preserves_selected_skill(self):
         self.gateway_responses.append((503, b''))
@@ -801,7 +1139,7 @@ class ChatTests(TestCase):
         self.assertIn("Scheduled task #", b"".join(response.streaming_content).decode())
 
     def test_schedule_cap_can_be_configured_and_canceling_releases_a_slot(self):
-        from superharry.models import ChatLimits, Conversation, Schedule
+        from superharry.models import Conversation, Schedule
 
         admin = Client()
         admin.force_login(get_user_model().objects.create_superuser(username="limit-admin"))
@@ -1057,23 +1395,30 @@ class ChatTests(TestCase):
         )
         self.assertEqual(self.requests, [])
 
-    def test_saved_memory_is_opt_in_and_scoped_to_one_conversation_and_owner(self):
+    def test_saved_memory_is_opt_in_at_conversation_creation_and_read_only_afterward(self):
         self.client.post("/memories/new/", {"content": "Coffee should be served black."})
         self.client.post("/memories/new/", {"content": "Prefer window seats."})
         other = Client()
         other.force_login(get_user_model().objects.create_user(username="another-memory-owner"))
         other.post("/memories/new/", {"content": "Coffee with another account's secret."})
 
-        first = self.client.post("/chat/send/", {"message": "What coffee do I prefer?"})
+        first = self.client.post("/chat/send/", {
+            "message": "What coffee do I prefer?", "memory_enabled": "on"
+        })
         list(first.streaming_content)
         history = first["Location"]
-        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+        outbound = json.dumps(self.requests[-1][2])
+        self.assertIn("Coffee should be served black.", outbound)
+        self.assertIn("Prefer window seats.", outbound)
+        self.assertNotIn("another account", outbound)
 
-        self.assertEqual(other.post(f"{history}memory/", {"memory_enabled": "on"}).status_code, 404)
-        self.assertRedirects(
-            self.client.post(f"{history}memory/", {"memory_enabled": "on"}), history
-        )
-        self.assertContains(self.client.get(history), "Memory is on")
+        self.assertEqual(other.post(f"{history}memory/", {"memory_enabled": "off"}).status_code, 404)
+        self.assertEqual(self.client.post(f"{history}memory/", {"memory_enabled": "off"}).status_code, 404)
+        page = self.client.get(history)
+        self.assertContains(page, 'aria-label="Memory: On"')
+        self.assertContains(page, 'title="Memory: On"')
+        self.assertNotContains(page, "Save memory setting")
+        self.assertNotContains(page, 'name="memory_enabled"')
         followup = self.client.post(f"{history}send/", {"message": "Coffee again?"})
         list(followup.streaming_content)
         outbound = json.dumps(self.requests[-1][2])
@@ -1084,6 +1429,14 @@ class ChatTests(TestCase):
         separate = self.client.post("/chat/send/", {"message": "Coffee in a separate chat"})
         list(separate.streaming_content)
         self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+        separate_page = self.client.get(separate["Location"])
+        self.assertContains(separate_page, 'aria-label="Memory: Off"')
+        self.assertNotContains(separate_page, 'name="memory_enabled"')
+
+    def test_new_conversation_memory_choice_is_unchecked_by_default(self):
+        page = self.client.get("/")
+        self.assertContains(page, "Use saved memories in this conversation")
+        self.assertNotContains(page, 'name="memory_enabled" checked')
 
     def test_text_skill_is_invoked_without_tools(self):
         self.assertContains(self.client.get("/"), "/summarize")
@@ -1269,3 +1622,99 @@ class ChatTests(TestCase):
                 self.assertContains(self.client.get(response["Location"]), "Incomplete reply")
                 self.assertEqual(len(self.requests), previous + 1)
                 self.assertEqual(self.requests[-1][2]["model"], "test/free-model")
+
+
+class PlaywrightDockerIntegrationTests(TransactionTestCase):
+    setUp = ChatTests.setUp
+
+    @unittest.skipUnless(os.environ.get("SKILL_BROWSER_DOCKER_TEST") == "1", "requires Docker Desktop browser image")
+    def test_approved_chat_task_runs_in_docker_and_publishes_citations(self):
+        from scripts.run_skill_jobs import process_queue
+        from superharry.models import ChatLimits, SkillOutbox, SkillRun
+        from tests.playwright_browser_smoke import FixtureMediator
+
+        ChatLimits.objects.get_or_create(pk=1)
+        args = json.dumps({"name": "playwright", "input": "https://fixture.example/start"})
+        event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "browser", "function": {
+            "name": "invoke_skill", "arguments": args,
+        }}]}}]}
+        self.gateway_responses.append((200, b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n"))
+        image = os.environ.get("SKILL_BROWSER_TEST_IMAGE", "superharry-skill-browser-worker:local")
+
+        with TemporaryDirectory() as directory, self.settings(SKILL_SPOOL=directory):
+            response = self.client.post("/chat/send/", {
+                "message": "Open https://fixture.example/start", "selected_skill": "playwright",
+            })
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=self.user, skill_name="playwright")
+            self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                "decision": "approve",
+            }).status_code, 302)
+            self.assertFalse(SkillOutbox.objects.filter(job_id=run.job_id).exists())
+            self.assertTrue((Path(directory) / f"{run.job_id}.skill-input").exists())
+            spool = Path(directory)
+            result_file = spool / f"{run.job_id}.skill-result"
+            worker_errors = []
+
+            def execute_worker():
+                from django.db import close_old_connections
+
+                close_old_connections()
+                try:
+                    process_queue(spool, browser_image=image, mediator=FixtureMediator())
+                except Exception as error:
+                    worker_errors.append(error)
+                finally:
+                    close_old_connections()
+
+            worker = Thread(target=execute_worker, daemon=True)
+            worker.start()
+            try:
+                deadline = monotonic() + 60
+                while monotonic() < deadline and not result_file.exists() and not worker_errors:
+                    sleep(0.1)
+                self.assertTrue(result_file.exists(), f"Early browser result was not published; worker errors={worker_errors}")
+                outcome = json.loads(result_file.read_text(encoding="utf-8"))
+                self.assertEqual(outcome["status"], "complete")
+                self.assertEqual(outcome["citations"], [
+                    "https://fixture.example/content/article/index.html",
+                    "https://fixture.example/content/related.html",
+                ])
+                self.assertTrue((spool / f"{run.job_id}.skill-running").exists())
+                self.assertFalse((spool / f"{run.job_id}.browser-command").exists(),
+                                 "The #66 citation flow must not need a screenshot command")
+
+                self.assertContains(self.client.get(f"/skill-runs/{run.job_id}/"),
+                                    "https://fixture.example/content/article/index.html")
+                run.reply.refresh_from_db()
+                self.assertIn("https://fixture.example/content/article/index.html", run.reply.content)
+                self.assertContains(self.client.get(f"/chat/{run.reply.conversation_id}/"),
+                                    "https://fixture.example/content/article/index.html")
+                self.assertTrue((spool / f"{run.job_id}.skill-running").exists(),
+                                "Reading the result and chat must leave the same page session active")
+
+                self.assertEqual(self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {
+                    "decision": "cancel",
+                }).status_code, 302)
+                worker.join(timeout=25)
+                self.assertFalse(worker.is_alive(), "Owner cancellation did not end the persistent session")
+                self.assertFalse(worker_errors, f"Browser worker failed: {worker_errors}")
+                self.assertFalse((spool / f"{run.job_id}.browser-consent").exists())
+                self.assertFalse((spool / f"{run.job_id}.skill-running").exists())
+                self.assertFalse((spool / f"{run.job_id}.skill-input").exists())
+                final = json.loads(result_file.read_text(encoding="utf-8"))
+                self.assertEqual(final["status"], "complete")
+                self.assertEqual(final["citations"], outcome["citations"])
+            finally:
+                if worker.is_alive():
+                    try:
+                        self.client.post(f"/skill-runs/{run.job_id}/browser-decision/", {"decision": "cancel"})
+                    except Exception:
+                        pass
+                    worker.join(timeout=20)
+                if worker.is_alive():
+                    from scripts.skill_sandbox import remove_container
+
+                    remove_container(run.job_id)
+                    worker.join(timeout=10)
+                self.assertFalse(worker.is_alive(), "Browser worker was not cleaned up after the test")

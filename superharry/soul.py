@@ -20,24 +20,27 @@ def guidance():
 @login_required
 @require_http_methods(["GET", "POST"])
 def settings(request):
-    error = ""
-    notice = ""
+    profile_error = ""
+    profile_notice = ""
+    password_notice = ""
     password_form = PasswordChangeForm(request.user, request.POST if request.method == "POST" and request.POST.get("action") == "password" else None)
+    has_avatar = bool(UserProfile.objects.filter(user=request.user).exclude(avatar__isnull=True).exclude(avatar=b"").exists())
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "password":
             if password_form.is_valid():
                 user = password_form.save()
                 update_session_auth_hash(request, user)
-                notice = "Password updated."
+                password_notice = "Password updated."
                 password_form = PasswordChangeForm(user)
         elif action == "remove-avatar":
             UserProfile.objects.filter(user=request.user).update(avatar=None)
-            notice = "Profile image removed."
+            has_avatar = False
+            profile_notice = "Profile image removed."
         elif action == "avatar":
             upload = request.FILES.get("avatar")
             if not upload or upload.size > django_settings.AVATAR_MAX_BYTES:
-                error = "Choose a PNG or JPEG within the profile image size limit."
+                profile_error = "Choose a PNG or JPEG within the profile image size limit."
             else:
                 try:
                     with Image.open(upload) as image:
@@ -49,12 +52,23 @@ def settings(request):
                         output = BytesIO()
                         image.save(output, format="PNG")
                     UserProfile.objects.update_or_create(user=request.user, defaults={"avatar": output.getvalue()})
-                    notice = "Profile image updated."
+                    has_avatar = True
+                    profile_notice = "Profile image updated."
                 except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-                    error = "Choose a valid PNG or JPEG image."
+                    profile_error = "Choose a valid PNG or JPEG image."
         else:
             return HttpResponse(status=400)
-    return render(request, "account_settings.html", {"soul": guidance(), "password_form": password_form, "error": error, "notice": notice})
+    return render(request, "account_settings.html", {
+        "soul": guidance(),
+        "password_form": password_form,
+        "profile_error": profile_error,
+        "profile_notice": profile_notice,
+        "password_notice": password_notice,
+        "has_avatar": has_avatar,
+        "avatar_max_bytes": django_settings.AVATAR_MAX_BYTES,
+        "avatar_max_mb": django_settings.AVATAR_MAX_BYTES / (1024 * 1024),
+        "avatar_initial": request.user.first_name or request.user.username,
+    })
 
 
 @login_required

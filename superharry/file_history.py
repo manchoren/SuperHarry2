@@ -20,11 +20,52 @@ def administrator(user):
     return user.is_superuser or user.groups.filter(name="Administrators").exists()
 
 
+def privileged_account(user):
+    return (
+        user.is_staff
+        or user.is_superuser
+        or user.groups.exists()
+        or user.user_permissions.exists()
+    )
+
+
 def audit_entries(actor, action, inputs=(), artifacts=()):
     if not administrator(actor):
         return
-    entries = [FileAccessAudit(actor=actor, owner_id=item.owner_id, action=action, file_kind="input", file_id=item.pk, file_name=item.name) for item in inputs]
-    entries += [FileAccessAudit(actor=actor, owner_id=item.run.owner_id, action=action, file_kind="artifact", file_id=item.pk, file_name=item.name) for item in artifacts]
+    entries = [
+        FileAccessAudit(
+            actor=actor,
+            actor_id_snapshot=actor.pk,
+            actor_username=actor.get_username(),
+            actor_is_privileged=privileged_account(actor),
+            owner_id=item.owner_id,
+            owner_id_snapshot=item.owner_id,
+            owner_username=item.owner.get_username(),
+            owner_is_privileged=privileged_account(item.owner),
+            action=action,
+            file_kind="input",
+            file_id=item.pk,
+            file_name=item.name,
+        )
+        for item in inputs
+    ]
+    entries += [
+        FileAccessAudit(
+            actor=actor,
+            actor_id_snapshot=actor.pk,
+            actor_username=actor.get_username(),
+            actor_is_privileged=privileged_account(actor),
+            owner_id=item.run.owner_id,
+            owner_id_snapshot=item.run.owner_id,
+            owner_username=item.run.owner.get_username(),
+            owner_is_privileged=privileged_account(item.run.owner),
+            action=action,
+            file_kind="artifact",
+            file_id=item.pk,
+            file_name=item.name,
+        )
+        for item in artifacts
+    ]
     FileAccessAudit.objects.bulk_create(entries)
 
 
@@ -41,15 +82,19 @@ def owner_for(request, *, required=False):
     return get_object_or_404(get_user_model(), pk=int(value))
 
 
-def visible_file(request, kind, identifier):
+def visible_file(request, kind, identifier, *, defer_payload=False):
     is_admin = administrator(request.user)
     if kind == "input":
         query = ChatInput.objects.select_related("owner", "message__conversation")
+        if defer_payload:
+            query = query.defer("payload")
         if not is_admin:
             query = query.filter(owner=request.user)
         return get_object_or_404(query, pk=identifier)
     if kind == "artifact":
         query = SkillArtifact.objects.select_related("run__owner", "run__reply__conversation", "group")
+        if defer_payload:
+            query = query.defer("payload")
         if not is_admin:
             query = query.filter(run__owner=request.user)
         return get_object_or_404(query, pk=identifier)
@@ -79,6 +124,29 @@ def history(request):
                   [item["object"] for item in page if item["kind"] == "artifact"])
     return render(request, "file_history.html", {"page": page, "selected_owner": owner, "is_admin": administrator(request.user),
                   "users": get_user_model().objects.order_by("username") if administrator(request.user) else ()})
+
+
+@never_cache
+@login_required
+@require_GET
+def detail(request, kind, identifier):
+    item = visible_file(request, kind, identifier, defer_payload=True)
+    inputs = [item] if kind == "input" else ()
+    artifacts = [item] if kind == "artifact" else ()
+    audit_entries(request.user, "view", inputs, artifacts)
+    if kind == "input":
+        conversation = item.message.conversation if item.message_id else None
+        owner = item.owner
+    else:
+        conversation = item.run.reply.conversation if item.run.reply_id else None
+        owner = item.run.owner
+    return render(request, "file_detail.html", {
+        "item": item,
+        "kind": kind,
+        "conversation": conversation,
+        "owner": owner,
+        "is_admin": administrator(request.user),
+    })
 
 
 @never_cache
@@ -190,4 +258,6 @@ def audit_log(request):
     if not administrator(request.user):
         raise Http404
     entries = FileAccessAudit.objects.select_related("actor", "owner").order_by("-occurred_at", "-pk")
+    if not request.user.is_superuser:
+        entries = entries.filter(owner_is_privileged=False)
     return render(request, "file_audit.html", {"page": Paginator(entries, 100).get_page(request.GET.get("page"))})

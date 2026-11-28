@@ -47,8 +47,20 @@ def manage(request):
                 ChatInput.objects.create(owner=request.user, name=name, media_type=media, payload=payload)
                 return redirect("inputs")
         error = "Choose a UTF-8 text or CSV file (up to 256 KiB), or a PNG or JPEG image (up to 2 MiB)."
-    items = ChatInput.objects.filter(owner=request.user).defer("payload").order_by("-pk")
+    items = ChatInput.objects.filter(owner=request.user).select_related("message__conversation").defer("payload").order_by("-pk")
     return render(request, "inputs.html", {"inputs": items, "error": error}, status=400 if error else 200)
+
+
+@never_cache
+@login_required
+@require_GET
+def detail(request, pk):
+    item = get_object_or_404(
+        ChatInput.objects.select_related("message__conversation").defer("payload"),
+        pk=pk,
+        owner=request.user,
+    )
+    return render(request, "input_detail.html", {"item": item})
 
 
 @never_cache

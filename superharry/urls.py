@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import artifacts, chat, csv_views, file_history, inputs, memories, skill_views, soul
+from . import account_deletion, account_lifecycle, accounts, artifacts, chat, csv_views, file_history, inputs, memories, skill_views, soul
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -10,7 +10,18 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
     path("settings/", soul.settings, name="account-settings"),
     path("settings/avatar/", soul.avatar, name="account-avatar"),
+    path("accounts/", accounts.account_list, name="account-list"),
+    path("accounts/new/", accounts.account_create, name="account-create"),
+    path("accounts/audit/", accounts.account_audit_log, name="account-audit"),
+    path("accounts/<int:pk>/", accounts.account_detail, name="account-detail"),
+    path("accounts/<int:pk>/edit/", accounts.account_edit, name="account-edit"),
+    path("accounts/<int:pk>/deactivate/", account_lifecycle.deactivate_account, name="account-deactivate"),
+    path("accounts/<int:pk>/reactivate/", account_lifecycle.reactivate_account, name="account-reactivate"),
+    path("accounts/<int:pk>/delete/", account_deletion.delete_account, name="account-delete"),
+    path("accounts/<int:pk>/password/", accounts.account_password_reset, name="account-password-reset"),
+    path("password/change/", accounts.password_change, name="required-password-change"),
     path("memories/", memories.MemoryList.as_view(), name="memories"),
+    path("memories/<int:pk>/", memories.MemoryDetail.as_view(), name="memory-detail"),
     path("skills/", skill_views.catalog, name="skills"),
     path("skills/new/", skill_views.create, name="skill-create"),
     path("skills/repository/<slug:name>/", skill_views.repository_detail, name="repository-skill-detail"),
@@ -19,6 +30,14 @@ urlpatterns = [
     path("skills/<slug:name>/prepare/", skill_views.prepare, name="skill-prepare"),
     path("skills/<slug:name>/run/", skill_views.run, name="skill-run"),
     path("skill-runs/<uuid:job_id>/", skill_views.run_detail, name="skill-run-detail"),
+    path("skill-runs/<uuid:job_id>/browser-decision/", skill_views.browser_task_decision, name="browser-task-decision"),
+    path("skill-runs/<uuid:job_id>/browser-view/", skill_views.browser_view, name="browser-session-view"),
+    path("skill-runs/<uuid:job_id>/browser-handoff/bridge/", skill_views.browser_handoff_bridge, name="browser-handoff-bridge"),
+    path("skill-runs/<uuid:job_id>/browser-handoff/input/", skill_views.browser_handoff_input, name="browser-handoff-input"),
+    path("skill-runs/<uuid:job_id>/browser-action/status/", skill_views.browser_action_status, name="browser-action-status"),
+    path("skill-runs/<uuid:job_id>/browser-action/decision/", skill_views.browser_action_decision, name="browser-action-decision"),
+      path("skill-runs/<uuid:job_id>/conversation/", skill_views.browser_session_chat, name="browser-session-chat"),
+    path("skill-runs/<uuid:job_id>/browser-screenshot/", skill_views.browser_screenshot, name="browser-session-screenshot"),
     path("skill-runs/<uuid:job_id>/artifacts/", skill_views.artifact_status, name="skill-artifact-status"),
     path("skill-artifacts/<int:pk>/download/", skill_views.artifact_download, name="skill-artifact-download"),
     path("skill-runs/<uuid:job_id>/network/<uuid:request_id>/", skill_views.network_decision, name="skill-network-decision"),
@@ -30,11 +49,13 @@ urlpatterns = [
     path("csv/<int:pk>/", csv_views.detail, name="csv-detail"),
     path("csv/<int:pk>/download/", csv_views.download, name="csv-download"),
     path("inputs/", inputs.manage, name="inputs"),
+    path("inputs/<int:pk>/", inputs.detail, name="input-detail"),
     path("inputs/<int:pk>/delete/", inputs.delete, name="input-delete"),
     path("inputs/<int:pk>/download/", inputs.download, name="input-download"),
     path("files/", file_history.history, name="file-history"),
     path("files/audit/", file_history.audit_log, name="file-audit"),
     path("files/delete/", file_history.delete, name="file-delete"),
+    path("files/<str:kind>/<int:identifier>/", file_history.detail, name="file-detail"),
     path("files/<str:kind>/<int:identifier>/download/", file_history.download, name="file-history-download"),
     path("", chat.page, name="chat"),
     path("chat/<int:conversation_id>/", chat.page, name="chat-history"),
@@ -45,9 +66,9 @@ urlpatterns = [
     path("chat/status/", chat.conversation_status, name="conversation-status"),
     path("chat/<int:conversation_id>/seen/", chat.mark_conversation_seen, name="conversation-seen"),
     path("chat/<int:conversation_id>/send/", chat.send, name="chat-continue"),
-    path("chat/<int:conversation_id>/memory/", chat.memory_setting, name="chat-memory"),
     path("chat/<int:conversation_id>/retry/<int:reply_id>/", chat.retry, name="chat-retry"),
     path("schedules/", chat.schedule_menu, name="schedules"),
+    path("schedules/<int:schedule_id>/", chat.schedule_detail, name="schedule-detail"),
     path("schedules/<int:schedule_id>/model/", chat.schedule_model, name="schedule-model"),
     path("schedules/<int:schedule_id>/cancel/", chat.cancel_schedule, name="schedule-cancel"),
 ]

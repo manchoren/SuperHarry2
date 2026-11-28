@@ -1,0 +1,13 @@
+{% extends "memories/base.html" %}
+
+{% block title %}Saved memory{% endblock %}
+
+{% block content %}
+  <nav aria-label="Breadcrumb"><a href="{% url 'memories' %}">Saved memories</a></nav>
+  <h1>Saved memory</h1>
+  <article class="memory-detail"><p>{{ object.content }}</p></article>
+  <div class="listing-actions listing-detail-actions">
+    <a class="listing-action" href="{% url 'memory-edit' object.pk %}">Edit</a>
+    <a class="listing-action listing-danger-action" href="{% url 'memory-delete' object.pk %}">Delete</a>
+  </div>
+{% endblock %}

@@ -11,6 +11,7 @@ import errno
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .chat import ChatOutcome, execute_message
@@ -31,7 +32,7 @@ def advance_schedule(occurrence):
         return
     following = next_occurrence(occurrence.due_at, schedule.wall_time, schedule.timezone,
                                 schedule.repetition, schedule.weekday)
-    Schedule.objects.filter(pk=schedule.pk, canceled=False, next_run__isnull=True).update(next_run=following)
+    Schedule.objects.filter(pk=schedule.pk, canceled=False, paused_at__isnull=True, next_run__isnull=True).update(next_run=following)
 
 
 def mark_missed(occurrence):
@@ -88,7 +89,9 @@ def recover_occurrences():
             occurrence.reply.completed_at = timezone.now()
             occurrence.reply.save(update_fields=("content", "completed_at"))
 
-    for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_preparation").select_related("reply"):
+    for occurrence in ScheduleOccurrence.objects.filter(
+        status="awaiting_preparation", schedule__paused_at__isnull=True, schedule__owner__is_active=True,
+    ).select_related("reply"):
         outcome = result(spool(), occurrence.preparation_job) if occurrence.preparation_job else {"status": "failed"}
         if outcome is None:
             continue
@@ -99,7 +102,9 @@ def recover_occurrences():
             occurrence.status = "complete" if success else "failed"
             occurrence.failure_reason = "" if success else text
             occurrence.save(update_fields=("status", "failure_reason"))
-    for occurrence in ScheduleOccurrence.objects.filter(status="awaiting_skill").select_related("skill_run", "reply"):
+    for occurrence in ScheduleOccurrence.objects.filter(
+        status="awaiting_skill", schedule__paused_at__isnull=True, schedule__owner__is_active=True,
+    ).select_related("skill_run", "reply"):
         outcome = run_result(spool(), occurrence.skill_run) if occurrence.skill_run else {"status": "failed"}
         if outcome is None:
             continue
@@ -109,6 +114,10 @@ def recover_occurrences():
             text += " " + outcome["message"]
         if outcome.get("reason") == "skill_deleted":
             text = "Skill deleted; execution stopped."
+        elif outcome.get("reason") == "account_deactivated":
+            text = "Account deactivated; skill execution stopped."
+            if outcome.get("external_action_uncertain"):
+                text += " An external action may already have completed and was not undone."
         elif outcome.get("reason") == "skill_changed_external":
             text = "Skill updated; execution stopped. External action was not repeated."
         elif outcome.get("reason") == "skill_changed_uncertain":
@@ -121,7 +130,9 @@ def recover_occurrences():
             occurrence.status = "complete" if success else "failed"
             occurrence.failure_reason = "" if success else text
             occurrence.save(update_fields=("status", "failure_reason"))
-    for occurrence in ScheduleOccurrence.objects.filter(status__in=("claimed", "running")).select_related("schedule", "reply"):
+    for occurrence in ScheduleOccurrence.objects.filter(
+        status__in=("claimed", "running"), schedule__paused_at__isnull=True, schedule__owner__is_active=True,
+    ).select_related("schedule", "reply"):
         with transaction.atomic():
             submission = ChatSubmission.objects.filter(owner=occurrence.schedule.owner, key=occurrence_key(occurrence)).first()
             if submission is None and occurrence.reply_id:
@@ -164,7 +175,10 @@ def recover_occurrences():
             if not occurrence.schedule.canceled:
                 Schedule.objects.filter(pk=occurrence.schedule_id, next_run__isnull=True).update(next_run=occurrence.due_at)
             occurrence.delete()
-    for schedule in Schedule.objects.filter(canceled=False, next_run__isnull=True, repetition__in=("daily", "weekly")):
+    for schedule in Schedule.objects.filter(
+        canceled=False, paused_at__isnull=True, owner__is_active=True,
+        next_run__isnull=True, repetition__in=("daily", "weekly"),
+    ):
         occurrence = schedule.occurrences.order_by("-due_at").first()
         if occurrence and occurrence.status not in ("claimed", "running"):
             advance_schedule(occurrence)
@@ -187,9 +201,17 @@ def run_due():
 
 def _run_due():
     now = timezone.now()
-    for schedule_id in Schedule.objects.filter(next_run__lte=now).values_list("pk", flat=True):
+    for schedule_id in Schedule.objects.filter(
+        next_run__lte=now, paused_at__isnull=True, owner__is_active=True,
+    ).values_list("pk", flat=True):
         with transaction.atomic():
-            schedule = Schedule.objects.filter(pk=schedule_id, next_run__lte=now).first()
+            if not Schedule.objects.filter(
+                pk=schedule_id, next_run__lte=now, paused_at__isnull=True, owner__is_active=True,
+            ).update(owner_id=F("owner_id")):
+                continue
+            schedule = Schedule.objects.filter(
+                pk=schedule_id, next_run__lte=now, paused_at__isnull=True, owner__is_active=True,
+            ).first()
             if schedule is None:
                 continue
             occurrence, created = ScheduleOccurrence.objects.get_or_create(
@@ -244,7 +266,13 @@ def _run_due():
             continue
 
         def create_reply():
-            if not Schedule.objects.filter(pk=schedule.pk, canceled=False, owner_id=schedule.conversation.owner_id).exists():
+            if not Schedule.objects.filter(
+                pk=schedule.pk,
+                canceled=False,
+                paused_at__isnull=True,
+                owner_id=schedule.conversation.owner_id,
+                owner__is_active=True,
+            ).exists():
                 raise AdmissionDenied("The schedule is canceled or unavailable.", 409)
             if timezone.now() > occurrence.due_at + timedelta(hours=1):
                 raise AdmissionDenied("The scheduled start window expired.", 410)
@@ -264,12 +292,16 @@ def _run_due():
             elif failure.status == 410:
                 mark_missed(occurrence)
             else:
-                occurrence.status = "skipped" if failure.status == 429 else "failed"
-                occurrence.reply = schedule.conversation.messages.create(
-                    role=Message.Role.ASSISTANT,
-                    content=f"Scheduled task {occurrence.status}: {failure}",
-                )
-                occurrence.save(update_fields=("reply", "status"))
+                occurrence.status = "skipped" if failure.status in (403, 429) else "failed"
+                if failure.status != 403:
+                    occurrence.reply = schedule.conversation.messages.create(
+                        role=Message.Role.ASSISTANT,
+                        content=f"Scheduled task {occurrence.status}: {failure}",
+                    )
+                    occurrence.save(update_fields=("reply", "status"))
+                else:
+                    occurrence.failure_reason = "The owner account became inactive before this task started."
+                    occurrence.save(update_fields=("failure_reason", "status"))
                 advance_schedule(occurrence)
             continue
         occurrence.reply = submission.reply

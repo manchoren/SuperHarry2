@@ -67,6 +67,21 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_label("Username:").fill("preview-user")
             page.get_by_label("Password:").fill("synthetic-password-32")
             page.get_by_role("button", name="Sign in").click()
+            folders_entry = page.get_by_role("link", name="Folders")
+            assert folders_entry.get_attribute("href") == "/inputs/"
+            assert page.get_by_role("link", name="File history").count() == 0
+            page.goto(f"http://127.0.0.1:{server.server_port}/inputs/")
+            assert page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Inputs").get_attribute("aria-current") == "page"
+            page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Files").click()
+            assert page.url.endswith("/files/")
+            assert page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Files").get_attribute("aria-current") == "page"
+            page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Inputs").click()
+            assert page.get_by_role("table").is_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            page.get_by_role("link", name="Input #1: sample.pdf").click()
+            assert page.get_by_role("heading", name="Input #1").is_visible()
+            assert page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Inputs").get_attribute("aria-current") == "page"
+            assert page.get_by_role("link", name="Download sample.pdf").is_visible()
             page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
             page.get_by_text("Download generated.pdf").wait_for()
             page.locator(".skill-artifacts button").first.click()
@@ -100,16 +115,41 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_text("Download local.pdf").wait_for()
             assert page.get_by_text("Download local.csv").is_visible()
             page.get_by_role("link", name="Conversation files").click()
+            assert page.get_by_role("table").is_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            for path in ("/inputs/", "/files/", f"/chat/{conversation.pk}/files/"):
+                for value, theme in (("0", "light"), ("1", "light"), ("2", "dark")):
+                    page.goto(f"http://127.0.0.1:{server.server_port}{path}")
+                    page.locator("[data-theme-select]").evaluate(
+                        "(element, value) => { element.value = value; element.dispatchEvent(new Event('input', {bubbles: true})); }",
+                        value,
+                    )
+                    assert page.locator("html").get_attribute("data-theme") == theme
+                    assert page.get_by_role("table").is_visible()
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/files/")
+            page.get_by_role("link", name="generated.pdf", exact=True).click()
+            assert page.get_by_role("heading", name="generated.pdf").is_visible()
+            assert page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Files").get_attribute("aria-current") == "page"
+            assert page.get_by_text("demo", exact=True).is_visible()
+            page.get_by_role("link", name="Back to conversation files").click()
             page.get_by_label("Group for generated_ver2.pdf").select_option(label="New separate group")
             page.get_by_label("Group for generated_ver2.pdf").locator("..").get_by_role("button", name="Move").click()
             page.get_by_label("Group for generated_ver2.pdf").select_option(index=0)
             page.get_by_label("Group for generated_ver2.pdf").locator("..").get_by_role("button", name="Move").click()
-            page.get_by_role("link", name="Delete all versions in generated.pdf").click()
+            page.get_by_role("link", name="Review deletion of all versions in generated.pdf").click()
             page.get_by_role("button", name="Confirm deletion").click()
             page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
             page.get_by_text("generated.pdf is no longer available").wait_for()
-            page.get_by_role("link", name="File history").click()
-            page.get_by_role("link", name="Delete local.csv").click()
+            page.get_by_role("link", name="Folders").click()
+            page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Files").click()
+            assert page.get_by_role("table").is_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            local_csv_row = page.get_by_role("row").filter(has_text="local.csv")
+            local_csv_row.get_by_role("group", name="File actions").get_by_role("button", name="Download").focus()
+            page.keyboard.press("Tab")
+            assert page.evaluate("document.activeElement.tagName") == "BUTTON"
+            local_csv_row.get_by_role("button", name="Delete").click()
             assert page.get_by_role("heading", name="Delete 1 file?").is_visible()
             page.get_by_role("button", name="Confirm deletion").click()
             page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
@@ -118,13 +158,16 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_label("Username:").fill("history-admin")
             page.get_by_label("Password:").fill("synthetic-admin-password-32")
             page.get_by_role("button", name="Sign in").click()
-            page.get_by_role("link", name="File history").click()
+            page.get_by_role("link", name="Folders").click()
+            page.get_by_role("navigation", name="Folder sections").get_by_role("link", name="Files").click()
+            assert page.get_by_role("table").is_visible()
             assert page.get_by_role("button", name="Review deletion").is_disabled()
             page.get_by_label("User", exact=True).select_option(label="preview-user")
             page.get_by_role("button", name="Show files").click()
             assert page.get_by_role("button", name="Review deletion").is_enabled()
-            page.get_by_role("link", name="Download local.pdf").click()
-            page.get_by_role("link", name="Administrative file access audit").click()
+            local_pdf_row = page.get_by_role("row").filter(has_text="local.pdf")
+            local_pdf_row.get_by_role("button", name="Download").click()
+            page.get_by_role("button", name="Administrative access audit").click()
             assert page.get_by_text("download", exact=False).count() > 0
             browser.close()
         print("File preview browser smoke passed")

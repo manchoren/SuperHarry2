@@ -1,15 +1,36 @@
 {% extends "memories/base.html" %}
 
+{% block title %}Saved memories{% endblock %}
+
 {% block content %}
-  <h1>Saved memories</h1>
-  <p><a href="{% url 'memory-create' %}">Add a memory</a></p>
-  {% for memory in memories %}
-    <article>
-      <p>{{ memory.content }}</p>
-      <a href="{% url 'memory-edit' memory.pk %}">Edit</a>
-      <a href="{% url 'memory-delete' memory.pk %}">Delete</a>
-    </article>
-  {% empty %}
-    <p>No saved memories yet.</p>
-  {% endfor %}
+  <header class="listing-header">
+    <div>
+      <h1>Saved memories</h1>
+      <p class="muted">Only you can inspect and manage your saved memories.</p>
+    </div>
+    <a class="listing-primary-action" href="{% url 'memory-create' %}">Add a memory</a>
+  </header>
+  <div class="listing-table-scroll" role="region" aria-label="Saved memories" tabindex="0">
+    <table class="listing-table">
+      <thead>
+        <tr><th scope="col">Memory</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for memory in memories %}
+          <tr>
+            <td data-label="Memory">
+              <a class="listing-detail-link" href="{% url 'memory-detail' memory.pk %}">View memory</a>
+              <p class="listing-summary">{{ memory.content|truncatechars:160 }}</p>
+            </td>
+            <td class="listing-actions" data-label="Actions">
+              <a class="listing-action" href="{% url 'memory-edit' memory.pk %}">Edit</a>
+              <a class="listing-action listing-danger-action" href="{% url 'memory-delete' memory.pk %}">Delete</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td class="listing-empty" colspan="2">No saved memories yet. Add a memory when you are ready.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 {% endblock %}

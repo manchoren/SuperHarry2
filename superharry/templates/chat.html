@@ -16,7 +16,6 @@
   {% include 'includes/navigation.html' with show_conversations=True %}
   <main class="main-content chat-content">
     <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
-    {% if conversation %}<p><a href="{% url 'conversation-files' conversation.pk %}">Conversation files</a></p>{% endif %}
     {% for schedule in schedules %}
       <article>
         <strong>Scheduled task #{{ schedule.pk }}</strong>
@@ -39,9 +38,21 @@
       {% if not conversation %}<p class="chat-welcome">What can we work on?</p>{% endif %}
       {% for message in history %}
         <article>
-          <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
-          {% if message.role == "user" %}{% include 'includes/avatar.html' %}{% endif %}
-          {% if message.selected_skill %}<small>Skill: {{ message.selected_skill }}</small>{% endif %}
+          <header class="message-header">
+            <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+            {% if message.role == "user" %}{% include 'includes/avatar.html' %}{% endif %}
+          </header>
+          {% if message.selected_skills %}
+            <p class="message-skill-mentions"><span>Skills:</span>
+              {% for skill_name in message.selected_skills %}
+                {% if skill_name|lower in available_skill_names %}<span class="skill-mention" title="Available skill: /{{ skill_name }}">/{{ skill_name }}</span>
+                {% else %}<span class="skill-mention is-unavailable" title="Unavailable skill: /{{ skill_name }}" aria-label="/{{ skill_name }}, unavailable">/{{ skill_name }}</span>{% endif %}
+              {% endfor %}
+            </p>
+          {% elif message.selected_skill %}
+            {% if message.selected_skill|lower in available_skill_names %}<small>Skill: {{ message.selected_skill }}</small>
+            {% else %}<small class="skill-mention is-unavailable" aria-label="Skill /{{ message.selected_skill }} is unavailable">Skill: /{{ message.selected_skill }} (unavailable)</small>{% endif %}
+          {% endif %}
           {% for occurrence in message.scheduleoccurrence_set.all %}
             <small>Scheduled task #{{ occurrence.schedule_id }}</small>
             {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
@@ -57,7 +68,8 @@
           {% if message.in_progress %}
             <small>Reply in progress</small>
           {% elif not message.complete %}
-            <small>Incomplete reply</small>
+            <div class="message-retry-row">
+              <small>Incomplete reply</small>
             {% if message.prompt_id and not message.has_later_attempt %}
               <form class="chat-retry" method="post" action="{% url 'chat-retry' conversation.pk message.pk %}">
                 {% csrf_token %}
@@ -65,35 +77,40 @@
                 <button type="submit">Retry reply</button>
               </form>
             {% endif %}
+            </div>
           {% endif %}
         </article>
       {% endfor %}
     </section>
     <p id="chat-status" role="status"></p>
     <p><a id="chat-history" hidden>Open saved conversation</a></p>
-    {% if conversation %}
-      <form method="post" action="{% url 'chat-memory' conversation.pk %}">
-        {% csrf_token %}
-        <label>
-          <input type="checkbox" name="memory_enabled"{% if conversation.memory_enabled %} checked{% endif %}>
-          Include relevant saved memories in model requests
-        </label>
-        <button type="submit">Save memory setting</button>
-        <small>Memory is {% if conversation.memory_enabled %}on{% else %}off{% endif %}</small>
-      </form>
-    {% endif %}
     <form id="composer" method="post" enctype="multipart/form-data" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
       {% csrf_token %}
       <input type="hidden" name="submission_id" value="{{ submission_id }}">
       {% if not conversation %}
         <label>
           <input type="checkbox" name="memory_enabled">
-          Include relevant saved memories in model requests
+          Use saved memories in this conversation
         </label>
       {% endif %}
       <label class="visually-hidden" for="message">Message</label>
-      <textarea id="message" name="message" rows="3" placeholder="Ask SuperHarry" required></textarea>
+      <div class="composer-message">
+        <pre id="message-highlights" class="message-highlights" aria-hidden="true"></pre>
+        <textarea id="message" name="message" rows="3" placeholder="Ask SuperHarry" required aria-autocomplete="list" aria-controls="skill-suggestions"></textarea>
+        <div id="skill-suggestions" class="skill-suggestions" role="listbox" aria-label="Skill suggestions" hidden></div>
+        <span id="skill-suggestion-status" class="visually-hidden" role="status" aria-live="polite"></span>
+      </div>
       <div class="composer-options">
+        {% if conversation %}
+          <a class="composer-action" href="{% url 'conversation-files' conversation.pk %}">
+            <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg>
+            <span>Conversation files</span>
+          </a>
+          <span class="conversation-memory-state" title="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}" aria-label="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}">
+            <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#brain"></use></svg>
+            <span class="visually-hidden">Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}</span>
+          </span>
+        {% endif %}
         <details class="composer-popover">
           <summary aria-label="Attach files" title="Attach files"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#plus"></use></svg><span>Files</span></summary>
           <div class="composer-panel"><label for="attachment">Attach files</label><input id="attachment" type="file" name="attachment" multiple>

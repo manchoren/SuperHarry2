@@ -3,11 +3,14 @@
   <button class="rail-button menu-toggle" type="button" aria-label="Toggle conversations" aria-expanded="true" aria-controls="site-sidebar" title="Toggle conversations"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#bars"></use></svg></button>
   <nav class="rail-nav" aria-label="Main navigation">
     <a class="rail-button" href="{% url 'chat' %}" aria-label="Chat" title="Chat"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#house"></use></svg></a>
-    <a class="rail-button" href="{% url 'inputs' %}" aria-label="Chat inputs" title="Chat inputs"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg></a>
-    <a class="rail-button" href="{% url 'file-history' %}" aria-label="File history" title="File history"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg></a>
+    <a class="rail-button" href="{% url 'inputs' %}" aria-label="Folders" title="Folders"{% if request.resolver_match.url_name == 'inputs' or request.resolver_match.url_name == 'input-detail' or request.resolver_match.url_name == 'file-history' or request.resolver_match.url_name == 'file-detail' %} aria-current="page"{% endif %}><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg></a>
     <a class="rail-button" href="{% url 'schedules' %}" aria-label="Schedules" title="Schedules"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#calendar-days"></use></svg></a>
     <a class="rail-button" href="{% url 'memories' %}" aria-label="Saved memories" title="Saved memories"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#brain"></use></svg></a>
     <a class="rail-button" href="{% url 'skills' %}" aria-label="Skills" title="Skills"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#puzzle-piece"></use></svg></a>
+    {% if can_manage_accounts %}
+      <a class="rail-button account-management-link" href="{% url 'account-list' %}" aria-label="Accounts" title="Accounts"><span aria-hidden="true">A</span></a>
+      <a class="rail-button account-management-link" href="{% url 'account-audit' %}" aria-label="Account audit" title="Account audit"><span aria-hidden="true">✓</span></a>
+    {% endif %}
     {% if has_previous_csv_results %}<a class="rail-button" href="{% url 'csv-upload' %}" aria-label="Previous CSV results" title="Previous CSV results"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#file-csv"></use></svg></a>{% endif %}
   </nav>
   <div class="sidebar-footer">

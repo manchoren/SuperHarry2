@@ -2,6 +2,7 @@
 import json
 import base64
 import os
+import subprocess
 import threading
 import time
 from io import BytesIO
@@ -11,12 +12,89 @@ from tempfile import TemporaryDirectory
 from unittest import skipUnless
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TransactionTestCase, override_settings
 
 
 @skipUnless(os.environ.get("SKILL_NETWORK_DOCKER_SMOKE") == "1", "Requires isolated Docker test image")
 class AgentSkillDockerTests(TransactionTestCase):
     serialized_rollback = True
+
+    def test_account_deactivation_stops_a_real_running_skill_container(self):
+        from scripts.run_skill_jobs import process_queue, validate_runtime
+        from scripts.skill_sandbox import container_name
+        from django.urls import reverse
+        from superharry.models import Conversation, SkillRun
+
+        owner = get_user_model().objects.create_user(username="deactivate-docker-owner")
+        manager = get_user_model().objects.create_user(username="deactivate-docker-manager", is_staff=True)
+        administrators, _ = Group.objects.get_or_create(name="Administrators")
+        manager.groups.add(administrators)
+        owner_client = self.client_class()
+        owner_client.force_login(owner)
+        manager_client = self.client_class()
+        manager_client.force_login(manager)
+        conversation = Conversation.objects.create(owner=owner, title="Deactivation worker")
+
+        class Gateway(BaseHTTPRequestHandler):
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if any(message.get("role") == "assistant" and message.get("tool_calls") for message in payload["messages"]):
+                    event = {"choices": [{"delta": {"content": "Queued."}}]}
+                else:
+                    args = {"name": "long-running", "input": "Wait"}
+                    event = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "run", "function": {
+                        "name": "invoke_skill", "arguments": json.dumps(args),
+                    }}]}}]}
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\ndata: [DONE]\n\n")
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+        gateway_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        gateway_thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(gateway_thread.join)
+        self.addCleanup(server.shutdown)
+        image = os.environ.get("SKILL_TEST_IMAGE", "superharry-skill-worker:local")
+        with TemporaryDirectory() as directory, override_settings(
+            SKILL_SPOOL=directory, OMNIROUTE_URL=f"http://127.0.0.1:{server.server_port}",
+            OMNIROUTE_API_KEY="synthetic", CHAT_MODEL="test/model",
+        ):
+            owner_client.post("/skills/new/", {
+                "name": "long-running", "purpose": "Wait", "instructions": "Wait",
+                "files": json.dumps({"main.py": "import time; time.sleep(30)"}), "dependencies": "[]",
+            })
+            owner_client.post("/skills/long-running/prepare/", {"entrypoint": "main.py"})
+            process_queue(Path(directory), runtime_check=validate_runtime, image=image)
+            response = owner_client.post(f"/chat/{conversation.pk}/send/", {"message": "Run long-running"})
+            list(response.streaming_content)
+            run = SkillRun.objects.get(owner=owner, skill_name="long-running")
+
+            worker = threading.Thread(
+                target=process_queue, args=(Path(directory),), kwargs={"runtime_check": validate_runtime, "image": image},
+            )
+            worker.start()
+            running = Path(directory) / f"{run.job_id}.skill-running"
+            deadline = time.monotonic() + 15
+            while not running.exists() and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertTrue(running.exists(), "skill worker did not enter the running state")
+
+            deactivation = manager_client.post(reverse("account-deactivate", args=(owner.pk,)))
+            self.assertIn(deactivation.status_code, (200, 202))
+            worker.join(timeout=45)
+            self.assertFalse(worker.is_alive(), "worker did not stop after account deactivation")
+            outcome = json.loads((Path(directory) / f"{run.job_id}.skill-result").read_text(encoding="utf-8"))
+            self.assertEqual(outcome["reason"], "account_deactivated")
+            self.assertEqual(outcome["generation"], 1)
+            containers = subprocess.check_output(
+                ["docker", "ps", "-a", "--format", "{{.Names}}"], text=True, timeout=15,
+            ).splitlines()
+            self.assertNotIn(container_name(run.job_id), containers)
 
     def test_agent_processes_images_with_the_real_sandbox(self):
         from django.core.files.uploadedfile import SimpleUploadedFile

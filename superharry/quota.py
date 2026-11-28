@@ -1,6 +1,7 @@
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from .account_state import lock_active_account
 from .models import ChatLimits, ChatSubmission, UserChatLimits
 
 
@@ -15,6 +16,8 @@ def admit(user, key, fingerprint, create_reply):
     # reservation before checking quota or creating any conversation records.
     try:
         with transaction.atomic():
+            if not lock_active_account(user.pk):
+                raise AdmissionDenied("This account is inactive.", 403)
             submission = ChatSubmission.objects.create(owner=user, key=key, fingerprint=fingerprint)
             limits = ChatLimits.objects.get(pk=1)
             override = UserChatLimits.objects.filter(user=user).first()

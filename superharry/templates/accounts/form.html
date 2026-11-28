@@ -1,0 +1,26 @@
+{% extends 'memories/base.html' %}
+{% block title %}{% if creating %}Create account{% else %}Edit account{% endif %}{% endblock %}
+{% block content %}
+<header class="listing-header">
+  <div>
+    <a class="listing-action" href="{% if creating %}{% url 'account-list' %}{% else %}{% url 'account-detail' account.pk %}{% endif %}">Cancel</a>
+    <h1>{% if creating %}{% if request.user.is_superuser %}Create an account{% else %}Create a regular account{% endif %}{% else %}Edit {{ account.username }}{% endif %}</h1>
+    <p class="muted">{% if creating %}Set an initial password. It is validated and never displayed again after submission.{% else %}Update the username or optional profile fields. Passwords are changed through a separate workflow.{% endif %}</p>
+  </div>
+</header>
+<form class="account-form" method="post">
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="field-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form %}
+    <div class="account-field">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<div class="field-help">{{ field.help_text|safe }}</div>{% endif %}
+      {% if field.errors %}<div class="field-errors" id="{{ field.id_for_label }}-errors" role="alert">{{ field.errors }}</div>{% endif %}
+    </div>
+  {% endfor %}
+  <div class="account-form-actions">
+    <button class="listing-primary-action" type="submit">{% if creating %}Create account{% else %}Save changes{% endif %}</button>
+  </div>
+</form>
+{% endblock %}

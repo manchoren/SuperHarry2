@@ -14,7 +14,7 @@ from .models import ArtifactGroup, Conversation, SkillArtifact
 @require_GET
 def conversation_files(request, conversation_id):
     conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
-    groups = list(ArtifactGroup.objects.filter(conversation=conversation, owner=request.user).prefetch_related('artifacts').order_by('name', 'pk'))
+    groups = list(ArtifactGroup.objects.filter(conversation=conversation, owner=request.user).prefetch_related('artifacts__run').order_by('name', 'pk'))
     return render(request, 'conversation_files.html', {'conversation': conversation, 'groups': groups})
 
 

@@ -1,14 +1,129 @@
 {% extends "memories/base.html" %}
+{% load static %}
 {% block title %}Skill result{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'superharry/browser-session.css' %}">{% endblock %}
 {% block content %}
   <h1>Skill result: {{ job.skill_name }}</h1>
-  {% if job.lifecycle == 'deleted' and not outcome %}<p role="status">Skill deleted; execution is stopping.</p>
+  {% if browser_consent_pending %}
+    <section class="account-panel" aria-labelledby="browser-consent-title">
+      <h2 id="browser-consent-title">Approve public page reading?</h2>
+      <p>This task will open the requested URL or public search results, follow main-page redirects, and may open up to five relevant public links using GET requests. It may also contact third-party public sites for page resources. Those requests pass through the host network mediator; the browser container has no direct network connection. Sites can assign effects to GET requests, and site or resource operators can receive request metadata.</p>
+      <p>Without the separate handoff option, this task uses GET requests only and cannot sign in, fill or submit forms, or click links. Do not approve a URL containing confidential information.</p>
+      {% if job.execution_payload.search_query %}
+        <p>Search question: <code>{{ job.execution_payload.search_query }}</code></p>
+        <p>Search provider: <a href="https://mwmbl.org/" rel="noreferrer">Mwmbl</a>. Its search results are available under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" rel="noreferrer">CC BY-NC-SA 4.0</a>.</p>
+        <p>To draft an answer, excerpts from pages opened for this search will be sent to the selected chat model ({{ job.execution_payload.answer_route_id }}). Page text is treated as untrusted source material.</p>
+      {% else %}
+        <p>Task URL: <code>{{ job.execution_payload.target_url }}</code></p>
+        {% if job.execution_payload.action_request %}
+          <p>Requested form action: <code>{{ job.execution_payload.action_request }}</code></p>
+          <p>If you enable the HTTPS handoff, this model route may receive visible form labels and safe field descriptions to prepare one draft: <code>{{ job.execution_payload.action_route_id }}</code>. The form must still pass local checks and you must approve its exact destination and values before it is sent.</p>
+        {% endif %}
+      {% endif %}
+      <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+        {% csrf_token %}
+        {% if not job.execution_payload.search_query %}<label><input type="checkbox" name="owner_handoff" value="on"> Also allow the HTTPS browser handoff. Sign-in forms are limited to recognizable username and password fields. Other supported form submissions pause for your separate approval of the exact destination and fields. {% if job.execution_payload.action_request %}The agent will prepare only the requested draft after you take control; it will not send until you approve that exact proposal.{% endif %} Payments, purchases, transfers, and card data are always blocked. JavaScript stays off; credentials, cookies, and page captures are not saved by this app.</label>{% endif %}
+        {% if not job.execution_payload.search_query %}<label><input type="checkbox" name="continue_with_model" value="on"> Requires the HTTPS browser handoff option above. After you return control, the browser may read up to five relevant links with GET in your authenticated session, then send their visible text and your original request to {{ job.execution_payload.answer_route_id }} for one follow-up answer. It will not click, fill forms, run page scripts, or continue external actions. Credentials, cookies, screenshots, and values you typed during sign-in are excluded; authenticated page text may contain private account information.</label>{% endif %}
+        <button name="decision" value="approve">Approve read-only browsing for this task</button>
+        <button name="decision" value="deny">Deny</button>
+      </form>
+    </section>
+  {% elif browser_authorized %}
+    <p role="status">Public browsing is approved for this task only. The approval ends when the run ends.</p>
+    {% if browser_session_active %}
+      <div class="browser-workspace">
+        {% if browser_conversation_id %}
+          <section class="browser-workspace__chat" aria-label="Conversation">
+            <iframe title="Conversation for this browser task" src="{% url 'browser-session-chat' job.job_id %}"
+                    sandbox="allow-forms allow-scripts allow-same-origin"></iframe>
+          </section>
+        {% endif %}
+        <aside class="browser-session" data-browser-session data-status-url="{% url 'skill-artifact-status' job.job_id %}"
+               {% if browser_handoff_enabled %}data-input-url="{% url 'browser-handoff-input' job.job_id %}"
+                 data-action-status-url="{% url 'browser-action-status' job.job_id %}"
+                 data-action-decision-url="{% url 'browser-action-decision' job.job_id %}"{% endif %}>
+        <div class="browser-session__toolbar">
+          {% if browser_conversation_id %}<button type="button" class="browser-session__return" data-return-chat
+                    data-chat-url="{% url 'chat-history' browser_conversation_id %}">Return to conversation</button>{% endif %}
+          <button type="button" data-browser-open aria-expanded="true">
+            <svg data-browser-hide-icon aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <svg data-browser-show-icon class="is-hidden" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+              <path d="m3 3 18 18M10.6 5.2A10 10 0 0 1 12 5c6.4 0 10 7 10 7a15 15 0 0 1-3 3.8M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7c1.3 0 2.4-.3 3.4-.7" />
+              <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+            </svg>
+            <span data-browser-toggle-label>Hide browser</span>
+          </button>
+          {% if not browser_handoff_enabled %}<form method="post" action="{% url 'browser-session-screenshot' job.job_id %}" data-screenshot-form>
+            {% csrf_token %}<button type="submit">Save screenshot</button>
+          </form>{% endif %}
+          <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+            {% csrf_token %}<button name="decision" value="cancel">End browser session</button>
+          </form>
+        </div>
+        <div class="browser-session__view" data-browser-view>
+          <img src="{% url 'browser-session-view' job.job_id %}" alt="Owner-only screenshot of the active public page"{% if browser_handoff_enabled %} data-owner-frame{% endif %}>
+          <p data-screenshot-status role="status" aria-live="polite"></p>
+        </div>
+        {% if browser_handoff_enabled %}
+          <section class="browser-owner-control" aria-label="Manual sign-in control">
+            {% if browser_owner_control %}
+              <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+                {% csrf_token %}<button name="decision" value="return_control">Return control and finish</button>
+              </form>
+              <label>Text to type into the page <input type="password" data-owner-text autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="1024"></label>
+              <button type="button" data-owner-type>Type into page</button>
+              <button type="button" data-owner-key="Enter">Press Enter</button>
+              <button type="button" data-owner-key="Tab">Press Tab</button>
+              <form hidden data-owner-csrf>{% csrf_token %}</form>
+              <section class="browser-action-review" data-action-review hidden aria-labelledby="browser-action-review-title">
+                <h2 id="browser-action-review-title">Review this form action</h2>
+                <p data-action-summary></p>
+                <p>Destination and method: <code data-action-destination></code></p>
+                <p>Form labels from the website (untrusted):</p>
+                <pre data-action-form-text></pre>
+                <p>Fields and values that will be sent:</p>
+                <ul data-action-fields></ul>
+                <p>Inspect the page above. Approving sends this exact request once. Reject it if the destination, content, or effect is unclear. Payments, purchases, transfers, and card information are blocked even if approved.</p>
+                <button type="button" data-action-decision="approve">Approve this action</button>
+                <button type="button" data-action-decision="deny">Reject this action</button>
+              </section>
+              <p>Click the page to control it. Every non-login form submission pauses for your review. Typed text stays only in this live session. Payments, purchases, transfers, card information, and unclear forms are blocked.</p>
+            {% else %}
+              <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+                {% csrf_token %}<button name="decision" value="take_control">Take control to sign in</button>
+              </form>
+            {% endif %}
+          </section>
+        {% endif %}
+        </aside>
+      </div>
+    {% endif %}
+    <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+      {% if not browser_session_active %}{% csrf_token %}<button name="decision" value="cancel">Stop this browser task</button>{% endif %}
+    </form>
+  {% endif %}
+  {% if job.lifecycle == 'cancelled' and not outcome %}<p role="status">Account deactivation requested cancellation. Waiting for the worker to confirm that execution has stopped.</p>
+  {% elif job.lifecycle == 'deleted' and not outcome %}<p role="status">Skill deleted; execution is stopping.</p>
   {% elif job.lifecycle == 'updated' and not outcome %}<p role="status">Skill updated; execution is stopping or restarting.</p>
   {% elif not outcome and delivery == 'publishing' %}<p role="status">Delivery outcome uncertain or publication in progress; operator investigation required. Job: <code>{{ job.job_id }}</code></p>
   {% elif not outcome %}<p role="status">Execution pending</p>
   {% elif outcome.status == 'complete' %}<pre>{{ outcome.output }}</pre>
+    {% if job.skill_name == 'playwright' and outcome.citations %}
+      <h2>Sources opened</h2>
+      <ul>{% for source in outcome.citations %}<li><a href="{{ source }}" rel="noopener noreferrer">{{ source }}</a></li>{% endfor %}</ul>
+    {% endif %}
+  {% elif outcome.reason == 'browser_consent_denied' %}<p>Public browsing was denied; no browser container was started.</p>
+  {% elif outcome.reason == 'browser_consent_expired' or outcome.reason == 'browser_consent_invalid' %}<p>Browser approval expired or could not be verified. No page request was made.</p>
+  {% elif outcome.reason == 'browser_cancelled' %}<p>The browser task was stopped.</p>
+  {% elif outcome.reason == 'search_provider_unavailable' %}<p>Mwmbl search could not run. {% if outcome.message %}{{ outcome.message }}{% else %}The shared quota ledger may be missing or the provider may be unavailable.{% endif %}</p>
+  {% elif outcome.reason == 'search_answer_unavailable' %}<p>The public pages were opened, but the selected chat model could not generate an answer. No synthesized answer was saved.</p>
+  {% elif outcome.reason == 'browser_failed' %}<p>The public page could not be read through the approved mediator.</p>
   {% elif outcome.status == 'timeout' %}<p>Execution timed out.</p>
   {% elif outcome.reason == 'skill_deleted' %}<p>Skill deleted; execution stopped.</p>
+  {% elif outcome.reason == 'account_deactivated' %}<p>Account was deactivated and the worker confirmed execution stopped.{% if outcome.external_action_uncertain %} An external action may already have completed; it was not undone.{% endif %}</p>
   {% elif outcome.reason == 'skill_changed_external' %}<p>Skill updated; execution stopped. External action was not repeated.</p>
   {% elif outcome.reason == 'skill_changed_uncertain' %}<p>Skill updated; execution stopped because prior external activity is unknown. The run was not automatically repeated.</p>
   {% elif outcome.reason == 'skill_changed_unavailable' %}<p>Skill updated; execution stopped because the original entrypoint is unavailable.</p>
@@ -28,8 +143,9 @@
       </form>
     </section>
   {% endfor %}
-  {% if not outcome and not network_requests %}
+  {% if not outcome and not network_requests and not browser_consent_pending and not browser_session_active %}
     <script>window.setTimeout(function () { window.location.reload(); }, 3000);</script>
   {% endif %}
+  {% if browser_session_active %}<script src="{% static 'superharry/browser-session.js' %}" defer></script>{% endif %}
   {% if job.skill %}<p><a href="{% url 'skill-detail' job.skill.name %}">Skill details</a></p>{% endif %}
 {% endblock %}

@@ -1,0 +1,48 @@
+{% extends 'memories/base.html' %}
+{% load tz %}
+{% block title %}Scheduled task #{{ schedule.pk }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'schedules' %}">Back to schedules</a></p>
+<h1>Scheduled task #{{ schedule.pk }}</h1>
+<dl>
+  <dt>Status</dt>
+  <dd>{% if schedule.canceled %}Canceled{% elif schedule.running %}Running{% elif schedule.next_run %}Scheduled{% else %}Submitted or finished{% endif %}</dd>
+  <dt>Prompt</dt>
+  <dd><p style="white-space:pre-wrap; overflow-wrap:anywhere;">{{ schedule.prompt }}</p></dd>
+  <dt>Conversation</dt>
+  <dd><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></dd>
+  <dt>Next execution</dt>
+  <dd>{% if schedule.next_run %}{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }}){% else %}None scheduled{% endif %}</dd>
+  <dt>Repetition</dt>
+  <dd>{{ schedule.repetition|capfirst }}{% if schedule.wall_time %} at {{ schedule.wall_time|time:"H:i" }}{% endif %}{% if schedule.weekday != None %} (weekday {{ schedule.weekday }}){% endif %}</dd>
+  <dt>Latest outcome</dt>
+  <dd>{% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"None yet" }}{% endif %}</dd>
+  {% if latest_occurrence %}
+    <dt>Latest execution</dt>
+    <dd>{% localtime off %}{{ latest_occurrence.due_at|date:"Y-m-d H:i T" }}{% endlocaltime %} · {{ latest_occurrence.get_status_display|default:latest_occurrence.status }}</dd>
+    {% if latest_occurrence.failure_reason %}<dt>Execution details</dt><dd><p style="white-space:pre-wrap; overflow-wrap:anywhere;">{{ latest_occurrence.failure_reason }}</p></dd>{% endif %}
+    {% if latest_occurrence.user_request %}<dt>Pending user request</dt><dd><p style="white-space:pre-wrap; overflow-wrap:anywhere;">{{ latest_occurrence.user_request }}</p></dd>{% endif %}
+  {% endif %}
+  <dt>Preferred model</dt>
+  <dd>{{ schedule.preferred_model|default:"Use active model" }}</dd>
+  {% if schedule.created_by_id %}
+    <dt>Creation provenance</dt>
+    <dd>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</dd>
+  {% endif %}
+  <dt>Conversation inputs</dt>
+  <dd>{{ schedule.input_ids|length }}</dd>
+</dl>
+{% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
+  <section aria-label="Scheduled task actions">
+    <form method="post" action="{% url 'schedule-model' schedule.pk %}">
+      {% csrf_token %}<label>Model <select name="model"><option value="">Use active model</option>
+      {% if schedule.preferred_model and schedule.preferred_model not in routes %}<option value="{{ schedule.preferred_model }}" selected disabled>{{ schedule.preferred_model }} (unavailable)</option>{% endif %}
+      {% for route in routes %}<option value="{{ route }}"{% if route == schedule.preferred_model %} selected{% endif %}>{{ route }}</option>{% endfor %}</select></label>
+      <button type="submit">Save model</button>
+    </form>
+    <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
+      {% csrf_token %}<input type="hidden" name="return_to" value="menu"><button type="submit">Cancel schedule</button>
+    </form>
+  </section>
+{% endif %}
+{% endblock %}

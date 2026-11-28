@@ -1,4 +1,8 @@
 import json
+import math
+import socket
+import threading
+import time
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -68,26 +72,59 @@ def provider_connections():
     ]
 
 
-def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=None):
+def _response_lines(response, deadline):
+    while True:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Gateway stream exceeded its total time limit")
+            try:
+                response.fp.raw._sock.settimeout(min(30.0, remaining))
+            except AttributeError:
+                pass
+        try:
+            line = response.readline()
+        except (HTTPException, OSError, ValueError) as error:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("Gateway stream exceeded its total time limit") from error
+            raise
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("Gateway stream exceeded its total time limit")
+        if not line:
+            return
+        yield line
+
+
+def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=None, gateway_url=None,
+                 gateway_api_key=None, total_timeout=None):
+    if total_timeout is not None and (
+        isinstance(total_timeout, bool) or not isinstance(total_timeout, (int, float))
+        or not math.isfinite(total_timeout) or total_timeout <= 0
+    ):
+        raise ValueError("total_timeout must be a positive finite number")
     payload = {"model": route_id, "messages": messages, "stream": True}
     if tools:
         payload["tools"] = tools
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    gateway_url = settings.OMNIROUTE_URL if gateway_url is None else gateway_url
+    gateway_api_key = settings.OMNIROUTE_API_KEY if gateway_api_key is None else gateway_api_key
     request = Request(
-        f"{settings.OMNIROUTE_URL.rstrip('/')}/v1/chat/completions",
+        f"{gateway_url.rstrip('/')}/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {settings.OMNIROUTE_API_KEY}",
+            "Authorization": f"Bearer {gateway_api_key}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         },
     )
     opener = build_opener(ProxyHandler({}), NoRedirect())
+    deadline = time.monotonic() + total_timeout if total_timeout is not None else None
     try:
         if on_submit is not None:
             on_submit()
-        response = opener.open(request, timeout=30)
+        open_timeout = 30 if deadline is None else max(0.001, min(30, deadline - time.monotonic()))
+        response = opener.open(request, timeout=open_timeout)
     except HTTPError as error:
         error.close()
         if error.code in (402, 429):
@@ -96,47 +133,68 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
     except (URLError, TimeoutError):
         raise GatewayFailure("The free route is currently unavailable.") from None
     calls = {}
+    deadline_timer = None
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            response.close()
+            raise TimeoutError("Gateway stream exceeded its total time limit")
+
+        def interrupt_response():
+            try:
+                response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+            except (AttributeError, OSError):
+                pass
+            response.close()
+
+        deadline_timer = threading.Timer(remaining, interrupt_response)
+        deadline_timer.daemon = True
+        deadline_timer.start()
     with response:
-        for line in response:
-            if not line.startswith(b"data:"):
-                continue
-            data = line[5:].strip()
-            if data == b"[DONE]":
-                for call in calls.values():
-                    yield {"tool_call": call}
-                return
-            event = json.loads(data)
-            error = event.get("error")
-            if isinstance(error, dict) and (
-                error.get("type") == "rate_limit_error"
-                or error.get("code") in ("model_cooldown", "rate_limit_exceeded", "insufficient_quota")
-            ):
-                raise GatewayFailure("The free route has exhausted its quota or rate limit.")
-            if error:
-                break
-            choices = event.get("choices")
-            if choices:
-                delta = choices[0].get("delta", {})
-                content = delta.get("content")
-                if isinstance(content, str) and content:
-                    yield content
-                for part in delta.get("tool_calls", []):
-                    index = part.get("index")
-                    if not isinstance(index, int) or not 0 <= index < 10:
-                        raise ValueError("Invalid tool call index.")
-                    call = calls.setdefault(index, {"name": "", "arguments": ""})
-                    if "id" in part:
-                        if not isinstance(part["id"], str) or len(part["id"]) > 255:
-                            raise ValueError("Invalid tool call ID.")
-                        call["id"] = part["id"]
-                    function = part.get("function") or {}
-                    for key in ("name", "arguments"):
-                        fragment = function.get(key, "")
-                        if not isinstance(fragment, str):
-                            raise ValueError("Invalid tool call fragment.")
-                        call[key] += fragment
-                        if len(call[key]) > 65536:
-                            raise ValueError("Tool call too large.")
+        try:
+            for line in _response_lines(response, deadline):
+                if not line.startswith(b"data:"):
+                    continue
+                data = line[5:].strip()
+                if data == b"[DONE]":
+                    for call in calls.values():
+                        yield {"tool_call": call}
+                    return
+                event = json.loads(data)
+                error = event.get("error")
+                if isinstance(error, dict) and (
+                    error.get("type") == "rate_limit_error"
+                    or error.get("code") in ("model_cooldown", "rate_limit_exceeded", "insufficient_quota")
+                ):
+                    raise GatewayFailure("The free route has exhausted its quota or rate limit.")
+                if error:
+                    break
+                choices = event.get("choices")
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        yield content
+                    for part in delta.get("tool_calls", []):
+                        index = part.get("index")
+                        if not isinstance(index, int) or not 0 <= index < 10:
+                            raise ValueError("Invalid tool call index.")
+                        call = calls.setdefault(index, {"name": "", "arguments": ""})
+                        if "id" in part:
+                            if not isinstance(part["id"], str) or len(part["id"]) > 255:
+                                raise ValueError("Invalid tool call ID.")
+                            call["id"] = part["id"]
+                        function = part.get("function") or {}
+                        for key in ("name", "arguments"):
+                            fragment = function.get(key, "")
+                            if not isinstance(fragment, str):
+                                raise ValueError("Invalid tool call fragment.")
+                            call[key] += fragment
+                            if len(call[key]) > 65536:
+                                raise ValueError("Tool call too large.")
+        finally:
+            if deadline_timer is not None:
+                deadline_timer.cancel()
     raise OSError("The gateway stream ended before completion.")
 
 

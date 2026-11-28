@@ -6,6 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Saved memories{% endblock %} · SuperHarry2</title>
   <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  {% block extra_head %}{% endblock %}
+  <link rel="stylesheet" href="{% static 'superharry/management-tables.css' %}">
+  <link rel="stylesheet" href="{% static 'superharry/folders-tabs.css' %}">
   <script src="{% static 'superharry/theme.js' %}"></script>
 </head>
 <body class="app-shell">
@@ -13,5 +16,6 @@
   <main class="main-content">
     {% block content %}{% endblock %}
   </main>
+  {% block extra_scripts %}{% endblock %}
 </body>
 </html>

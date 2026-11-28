@@ -6,7 +6,7 @@ from django.http import Http404, HttpResponseRedirect
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
-from django.views.generic import CreateView, DeleteView, ListView, UpdateView
+from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
 from .models import SavedMemory
 
@@ -39,6 +39,10 @@ class OwnedMemoryView(LoginRequiredMixin):
 class MemoryList(OwnedMemoryView, ListView):
     template_name = "memories/list.html"
     context_object_name = "memories"
+
+
+class MemoryDetail(OwnedMemoryView, DetailView):
+    template_name = "memories/detail.html"
 
 
 class MemoryCreate(OwnedMemoryView, CreateView):

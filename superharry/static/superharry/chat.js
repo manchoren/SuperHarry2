@@ -8,6 +8,142 @@ selectedSkill?.addEventListener("input", () => {
   document.querySelector("#selected-skill-label").textContent = selectedSkill.value ? `Skill: ${selectedSkill.value}` : "";
 });
 
+const highlights = document.querySelector("#message-highlights");
+const skillSuggestions = document.querySelector("#skill-suggestions");
+const skillSuggestionStatus = document.querySelector("#skill-suggestion-status");
+const availableSkillOptions = Array.from(document.querySelectorAll("#available-skills option"), (option) => ({
+  name: option.value,
+  purpose: option.getAttribute("label") || option.textContent,
+}));
+const availableSkillNames = new Set(availableSkillOptions.map((item) => item.name.toLowerCase()));
+let suggestionItems = [];
+let activeSuggestion = -1;
+let mentionStart = -1;
+
+function updateHighlights() {
+  if (!input || !highlights) return;
+  const value = input.value;
+  const fragment = document.createDocumentFragment();
+  const pattern = /\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,46}[A-Za-z0-9])?)(?![A-Za-z0-9_/-])/g;
+  let cursor = 0;
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const previous = value[start - 1];
+    const isMention = !previous || !/[\w/]/.test(previous);
+    fragment.append(document.createTextNode(value.slice(cursor, start)));
+    if (isMention) {
+      const marker = document.createElement("mark");
+      const available = availableSkillNames.has(match[1].toLowerCase());
+      marker.className = available ? "skill-mention" : "skill-mention is-unavailable";
+      marker.textContent = match[0];
+      fragment.append(marker);
+    } else {
+      fragment.append(document.createTextNode(match[0]));
+    }
+    cursor = end;
+  }
+  fragment.append(document.createTextNode(value.slice(cursor)));
+  highlights.replaceChildren(fragment);
+  highlights.scrollTop = input.scrollTop;
+  highlights.scrollLeft = input.scrollLeft;
+}
+
+function closeSkillSuggestions() {
+  if (!skillSuggestions) return;
+  skillSuggestions.hidden = true;
+  skillSuggestions.replaceChildren();
+  suggestionItems = [];
+  activeSuggestion = -1;
+  mentionStart = -1;
+  if (skillSuggestionStatus) skillSuggestionStatus.textContent = "";
+  input?.removeAttribute("aria-activedescendant");
+}
+
+function selectSkillSuggestion(name) {
+  if (!input || mentionStart < 0) return;
+  input.setRangeText(`/${name} `, mentionStart, input.selectionStart, "end");
+  input.dispatchEvent(new Event("input", {bubbles: true}));
+  closeSkillSuggestions();
+  input.focus();
+}
+
+function updateSkillSuggestions() {
+  if (!input || !skillSuggestions || input.readOnly) return closeSkillSuggestions();
+  const caret = input.selectionStart;
+  const beforeCaret = input.value.slice(0, caret);
+  const queryMatch = beforeCaret.match(/(?:^|[^\w/])\/([A-Za-z0-9-]*)$/);
+  if (!queryMatch) return closeSkillSuggestions();
+  const query = queryMatch[1].toLowerCase();
+  mentionStart = caret - query.length - 1;
+  suggestionItems = availableSkillOptions
+    .filter((item) => item.name.toLowerCase().startsWith(query))
+    .slice(0, 8);
+  activeSuggestion = -1;
+  skillSuggestions.replaceChildren();
+  suggestionItems.forEach((item, index) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.id = `skill-suggestion-${index}`;
+    option.className = "skill-suggestion";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.textContent = `/${item.name}${item.purpose ? ` - ${item.purpose}` : ""}`;
+    option.addEventListener("mousedown", (event) => event.preventDefault());
+    option.addEventListener("click", () => selectSkillSuggestion(item.name));
+    skillSuggestions.append(option);
+  });
+  skillSuggestions.hidden = suggestionItems.length === 0;
+  if (skillSuggestionStatus) {
+    skillSuggestionStatus.textContent = suggestionItems.length
+      ? `${suggestionItems.length} skill suggestions available.`
+      : "No skill suggestions available.";
+  }
+  input.removeAttribute("aria-activedescendant");
+}
+
+function setActiveSuggestion(index) {
+  if (!suggestionItems.length) return;
+  activeSuggestion = (index + suggestionItems.length) % suggestionItems.length;
+  skillSuggestions.querySelectorAll('[role="option"]').forEach((option, optionIndex) => {
+    const active = optionIndex === activeSuggestion;
+    option.setAttribute("aria-selected", String(active));
+    if (active) {
+      input.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView({block: "nearest"});
+    }
+  });
+}
+
+if (input && highlights && skillSuggestions) {
+  input.addEventListener("input", () => {
+    updateHighlights();
+    updateSkillSuggestions();
+  });
+  input.addEventListener("click", updateSkillSuggestions);
+  input.addEventListener("keyup", (event) => {
+    if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) updateSkillSuggestions();
+  });
+  input.addEventListener("scroll", updateHighlights);
+  input.addEventListener("keydown", (event) => {
+    if (skillSuggestions.hidden) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestion(activeSuggestion + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestion(activeSuggestion < 0 ? suggestionItems.length - 1 : activeSuggestion - 1);
+    } else if (event.key === "Enter" && suggestionItems.length) {
+      event.preventDefault();
+      selectSkillSuggestion(suggestionItems[activeSuggestion < 0 ? 0 : activeSuggestion].name);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeSkillSuggestions();
+    }
+  });
+  updateHighlights();
+}
+
 function appendMessage(role, text) {
   const article = document.createElement("article");
   const label = document.createElement("strong");
@@ -59,6 +195,7 @@ async function submitChat(event) {
     data.delete("attachment");
     window.chatFilePond.getFiles().forEach((item) => data.append("attachment", item.file, item.filename));
   }
+  if (sendingMessage) closeSkillSuggestions();
   chatButtons.forEach((button) => { button.disabled = true; });
   input.readOnly = true;
   statusMessage.textContent = "Waiting for the model…";

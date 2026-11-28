@@ -85,6 +85,7 @@ def provision(directory, env_file):
         env.pop(name, None)
     if env.get("SKILL_SPOOL_DIRECTORY"):
         compose(["docker", "build", "--target", "skill-worker", "-t", "superharry-skill-worker:local", "."], env)
+        compose(["docker", "build", "--target", "skill-browser-worker", "-t", "superharry-skill-browser-worker:local", "."], env)
     local_secrets = {
         **GATEWAY_SECRETS,
         "django_secret_key": "DJANGO_SECRET_KEY_PATH",

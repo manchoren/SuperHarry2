@@ -29,8 +29,10 @@ def exchange(kind, action):
         sys.stdout.write(json.dumps({"kind": kind, "action": action}, ensure_ascii=True) + "\n")
         sys.stdout.flush()
         response = json.loads(sys.stdin.buffer.readline(9 * 1024 * 1024))
-    if response.get("status") != "complete":
+    if not isinstance(response, dict) or response.get("status") != "complete":
         raise ValueError("Network request failed")
+    if kind == "browser":
+        return response
     return base64.b64decode(response["body"], validate=True)
 
 
@@ -98,7 +100,7 @@ class PackageProxy(BaseHTTPRequestHandler):
         pass
 
 
-def serve_network(path):
+def serve_network(path, *, max_request_bytes=64 * 1024):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(path))
         listener.listen(4)
@@ -106,18 +108,210 @@ def serve_network(path):
             connection, _ = listener.accept()
             with connection, connection.makefile("rb") as incoming:
                 try:
-                    raw = incoming.readline(64 * 1024 + 1)
-                    if len(raw) > 64 * 1024:
+                    raw = incoming.readline(max_request_bytes + 1)
+                    if len(raw) > max_request_bytes:
                         raise ValueError("Request too large")
                     action = json.loads(raw)
-                    body = exchange("network", action)
-                    response = {"status": "complete", "body": base64.b64encode(body).decode("ascii")}
+                    if not isinstance(action, dict):
+                        raise ValueError("Invalid network request")
+                    kind = action.pop("kind", "network")
+                    if kind not in ("network", "browser"):
+                        raise ValueError("Invalid network request")
+                    value = exchange(kind, action)
+                    if kind == "browser":
+                        response = value
+                        if (set(response) != {"status", "http_status", "headers", "body", "reviewed_action"}
+                                or type(response["http_status"]) is not int
+                                or type(response["reviewed_action"]) is not bool
+                                or not isinstance(response["headers"], dict)
+                                or not isinstance(response["body"], str)):
+                            raise ValueError("Invalid mediated browser response")
+                        body = base64.b64decode(response["body"], validate=True)
+                        if len(body) > 2 * 1024 * 1024:
+                            raise ValueError("Browser response too large")
+                    else:
+                        body = value
+                        response = {"status": "complete", "body": base64.b64encode(body).decode("ascii")}
                     connection.sendall(json.dumps(response, ensure_ascii=True).encode("ascii") + b"\n")
                 except (OSError, ValueError, TypeError):
                     try:
                         connection.sendall(b'{"status":"failed"}\n')
                     except OSError:
                         pass
+
+
+def run_playwright_request(request):
+    from browser_tasks import validate_browser_url
+
+    output = {"status": "failed", "stage": "execution", "reason": "browser_failed"}
+    try:
+        if set(request) != {"runtime", "target_url", "execution_timeout"} or request["runtime"] != "playwright-browser":
+            raise ValueError("Invalid browser request")
+        target_url = validate_browser_url(request["target_url"])
+        timeout = request["execution_timeout"]
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 150:
+            raise ValueError("Invalid execution timeout")
+        root = Path("/work")
+        socket_path = root / ".skill-network.sock"
+        threading.Thread(target=serve_network, args=(socket_path,), daemon=True).start()
+        import time
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        if not socket_path.exists():
+            raise OSError("Browser mediator unavailable")
+        sys.stdout.write('{"kind":"execution"}\n')
+        sys.stdout.flush()
+        completed = subprocess.run(
+            ["node", os.environ["SKILL_PLAYWRIGHT_ENTRYPOINT"]],
+            input=json.dumps({"runtime": "playwright-browser", "target_url": target_url,
+                              "execution_timeout": timeout}).encode("utf-8"),
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/work",
+                 "PLAYWRIGHT_BROWSERS_PATH": os.environ["PLAYWRIGHT_BROWSERS_PATH"],
+                 "SKILL_NETWORK_SOCKET": str(socket_path)},
+        )
+        if len(completed.stdout) > MAX_OUTPUT:
+            raise ValueError("Browser output limit")
+        structured = json.loads(completed.stdout.decode("utf-8"))
+        if (not isinstance(structured, dict) or set(structured) != {"ok", "message", "citations"}
+                or structured["ok"] is not True or not isinstance(structured["message"], str)
+                or len(structured["message"].encode("utf-8")) > MAX_OUTPUT
+                or not isinstance(structured["citations"], list) or len(structured["citations"]) > 10):
+            raise ValueError("Invalid browser response")
+        citations = [validate_browser_url(value) for value in structured["citations"]]
+        output = {"status": "complete", "output": structured["message"], "citations": citations}
+    except subprocess.TimeoutExpired:
+        output = {"status": "timeout", "stage": "execution", "reason": "execution_timeout"}
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
+        pass
+    sys.stdout.write(json.dumps(output, ensure_ascii=True) + "\n")
+    sys.stdout.flush()
+
+
+def run_playwright_session(request):
+    """Keep one mediated Chromium page alive until screenshot, cancel, or TTL."""
+    from browser_tasks import validate_browser_url
+
+    output = {"status": "failed", "stage": "execution", "reason": "browser_failed"}
+    process = None
+    try:
+        browser_search = request.get("browser_search") is True
+        follow_public_links = request.get("follow_public_links") is True
+        follow_authenticated_links = request.get("follow_authenticated_links") is True
+        base_expected = {"runtime", "execution_timeout", "browser_session", "browser_handoff"}
+        base_expected |= {"target_urls", "browser_search"} if browser_search else {"target_url"}
+        if follow_public_links:
+            base_expected.add("follow_public_links")
+        if follow_authenticated_links:
+            base_expected.add("follow_authenticated_links")
+        action_keys = {"action_request", "action_route_id"}
+        expected = base_expected if browser_search or not action_keys.issubset(request) else base_expected | action_keys
+        if (set(request) != expected or request["runtime"] != "playwright-browser"
+                or request["browser_session"] is not True or type(request["browser_handoff"]) is not bool
+                or browser_search and request["browser_handoff"]
+                or follow_public_links and (browser_search or request["browser_handoff"] or action_keys.issubset(request))
+                or follow_authenticated_links and (not request["browser_handoff"] or browser_search or follow_public_links)
+                or action_keys.issubset(request) and (request["browser_handoff"] is not True
+                   or not isinstance(request["action_request"], str) or not 1 <= len(request["action_request"]) <= 1000
+                   or not isinstance(request["action_route_id"], str) or not 1 <= len(request["action_route_id"]) <= 255)):
+            raise ValueError("Invalid browser session request")
+        if browser_search:
+            target_urls = request["target_urls"]
+            if not isinstance(target_urls, list) or not 1 <= len(target_urls) <= 5:
+                raise ValueError("Invalid browser search destinations")
+            target_urls = list(dict.fromkeys(validate_browser_url(value) for value in target_urls))
+            if not target_urls:
+                raise ValueError("At least one public search destination is required")
+        else:
+            target_url = validate_browser_url(request["target_url"])
+        timeout = request["execution_timeout"]
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not 0 < timeout <= 150:
+            raise ValueError("Invalid execution timeout")
+        root = Path("/work")
+        socket_path = root / ".skill-network.sock"
+        threading.Thread(target=serve_network, args=(socket_path,),
+                         kwargs={"max_request_bytes": 3 * 1024 * 1024}, daemon=True).start()
+        import time
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        if not socket_path.exists():
+            raise OSError("Browser mediator unavailable")
+        sys.stdout.write('{"kind":"execution"}\n')
+        sys.stdout.flush()
+        process = subprocess.Popen(
+            ["node", os.environ["SKILL_PLAYWRIGHT_SESSION_ENTRYPOINT"]],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            cwd=root,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/work",
+                 "PLAYWRIGHT_BROWSERS_PATH": os.environ["PLAYWRIGHT_BROWSERS_PATH"],
+                 "SKILL_NETWORK_SOCKET": str(socket_path)},
+        )
+        worker_payload = ({"runtime": "playwright-browser", "target_urls": target_urls,
+                         "browser_search": True, "execution_timeout": timeout, "browser_session": True,
+                         "browser_handoff": False} if browser_search else
+                        {"runtime": "playwright-browser", "target_url": target_url,
+                         "execution_timeout": timeout, "browser_session": True,
+                         "browser_handoff": request["browser_handoff"]})
+        if follow_public_links:
+            worker_payload["follow_public_links"] = True
+        if follow_authenticated_links:
+            worker_payload["follow_authenticated_links"] = True
+        if not browser_search and action_keys.issubset(request):
+            worker_payload["action_request"] = request["action_request"]
+        raw, _ = process.communicate(
+            json.dumps(worker_payload).encode("utf-8") + b"\n",
+            timeout=timeout,
+        )
+        if len(raw) > MAX_OUTPUT:
+            raise ValueError("Browser session output limit")
+        code = process.returncode
+        structured = json.loads(raw.decode("utf-8"))
+        if (isinstance(structured, dict) and set(structured) == {"status", "stage"}
+                and structured.get("status") == "failed"
+                and structured.get("stage") in {
+                    "input", "setup", "owner_control", "owner_input", "owner_redirect_manual",
+                    "owner_redirect_chain",
+                    "owner_frame_capture", "return_control", "authenticated_continuation", "handoff_cleanup",
+                    "result_extraction", "result_publish",
+                }):
+            output = {"status": "failed", "stage": structured["stage"], "reason": "browser_failed"}
+        elif code != 0:
+            raise subprocess.CalledProcessError(code, process.args)
+        elif (not isinstance(structured, dict) or structured.get("status") not in ("complete", "timeout")):
+            raise ValueError("Invalid browser session response")
+        elif structured["status"] == "timeout":
+            output = {"status": "timeout", "stage": "execution", "reason": "browser_session_idle_timeout"}
+        elif (set(structured) != {"status", "message", "citations"}
+              or not isinstance(structured["message"], str)
+              or len(structured["message"].encode("utf-8")) > MAX_OUTPUT
+              or not isinstance(structured["citations"], list) or len(structured["citations"]) > 10):
+            raise ValueError("Invalid browser session result")
+        else:
+            citations = [validate_browser_url(value) for value in structured["citations"]]
+            output = {"status": "complete", "output": structured["message"], "citations": citations}
+    except subprocess.TimeoutExpired:
+        output = {"status": "timeout", "stage": "execution", "reason": "browser_session_timeout"}
+    except subprocess.CalledProcessError:
+        pass
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                output = {"status": "failed", "stage": "execution", "reason": "browser_cleanup_unverified"}
+    sys.stdout.write(json.dumps(output, ensure_ascii=True) + "\n")
+    sys.stdout.flush()
 
 
 def main():
@@ -133,6 +327,12 @@ def main():
         if len(raw) > MAX_REQUEST:
             raise ValueError("Request too large")
         request = json.loads(raw)
+        if isinstance(request, dict) and request.get("runtime") == "playwright-browser":
+            if request.get("browser_session") is True:
+                run_playwright_session(request)
+            else:
+                run_playwright_request(request)
+            return
         files = validate_skill_files(request["files"])
         entrypoint = request["entrypoint"]
         input_text = request["input"]

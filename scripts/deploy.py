@@ -68,6 +68,8 @@ def deploy(env):
     if env.get("SKILL_SPOOL_DIRECTORY"):
         subprocess.run(["docker", "build", "--target", "skill-worker", "-t", "superharry-skill-worker:local", "."],
                        cwd=ROOT, env=env, check=True)
+        subprocess.run(["docker", "build", "--target", "skill-browser-worker", "-t", "superharry-skill-browser-worker:local", "."],
+                       cwd=ROOT, env=env, check=True)
     subprocess.run(command + ["up", "--build", "-d", "--no-deps", "django", "scheduler"],
                    cwd=ROOT, env=env, check=True)
     probe = (

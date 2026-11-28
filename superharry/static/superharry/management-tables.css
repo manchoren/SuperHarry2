@@ -1,0 +1,67 @@
+.listing-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+.listing-header h1 { margin-bottom: .35rem; }
+.listing-header p { margin: 0; }
+.listing-primary-action, .listing-action { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: .55rem .9rem; border: 1px solid var(--accent); border-radius: .65rem; background: var(--accent); color: var(--bg); font-weight: 650; text-decoration: none; white-space: nowrap; }
+.listing-primary-action:hover, .listing-action:hover { background: var(--accent-hover); color: var(--bg); }
+.listing-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.listing-table { width: 100%; border-collapse: collapse; text-align: left; }
+.listing-table th, .listing-table td { padding: .9rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.listing-table thead { background: var(--sidebar); }
+.listing-table thead th { color: var(--muted); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+.listing-table tbody tr:last-child > * { border-bottom: 0; }
+.listing-table tbody th { font-weight: 650; }
+.listing-table form { display: inline; }
+.listing-actions { text-align: right; white-space: nowrap; }
+.listing-actions form { margin-left: .35rem; }
+.listing-action { min-height: 2.5rem; padding: .4rem .75rem; font: inherit; font-size: .9rem; cursor: pointer; }
+.listing-danger-action { border-color: var(--line); background: transparent; color: var(--text); }
+.listing-danger-action:hover { background: var(--accent-soft); color: var(--text); }
+.listing-status { display: inline-block; max-width: 18rem; padding: .15rem .55rem; border-radius: 999px; background: var(--accent-soft); font-size: .85rem; overflow-wrap: anywhere; }
+.listing-status-warning { font-weight: 650; }
+.listing-empty { padding: 1.5rem !important; color: var(--muted); text-align: center; }
+.listing-summary { max-width: 55rem; margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.listing-detail-link { font-weight: 650; }
+.memory-detail { padding: 1rem 1.2rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.memory-detail p { margin: 0; white-space: pre-wrap; }
+.listing-detail-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+.listing-detail-actions form { margin: 0; }
+.listing-pagination { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; margin-top: 1rem; }
+.file-detail-list { display: grid; grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr); gap: .35rem .8rem; }
+.file-detail-list dt { color: var(--muted); font-weight: 650; }
+.file-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.group-delete-action { max-width: 100%; white-space: normal; text-align: center; overflow-wrap: anywhere; }
+.account-management-link span { font-size: 1.05rem; font-weight: 750; }
+.account-filters { display: flex; align-items: end; flex-wrap: wrap; gap: .65rem; margin: 0 0 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.account-filters label { display: grid; gap: .3rem; color: var(--muted); font-size: .85rem; }
+.account-filters input, .account-filters select, .account-field input, .account-field select { min-height: 2.75rem; max-width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: .55rem; background: var(--bg); color: var(--text); font: inherit; }
+.account-form { display: grid; gap: 1rem; width: min(100%, 42rem); padding: 1.25rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.account-field { display: grid; gap: .35rem; }
+.account-field > label { font-weight: 650; }
+.account-form-actions { display: flex; justify-content: flex-end; margin-top: .5rem; }
+.account-detail-list { display: grid; grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr); gap: .5rem 1rem; max-width: 50rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.account-detail-list dt { color: var(--muted); font-weight: 650; }
+.account-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 42rem) {
+  .listing-header { align-items: stretch; flex-direction: column; }
+  .listing-primary-action { align-self: flex-start; }
+  .file-detail-list { grid-template-columns: minmax(5.5rem, 30%) minmax(0, 1fr); }
+  .listing-table-scroll { overflow: visible; border: 0; background: transparent; }
+  .listing-table, .listing-table tbody { display: block; }
+  .listing-table { width: 100%; min-width: 0; }
+  .listing-table tr { width: 100%; min-width: 0; }
+  .listing-table th, .listing-table td { min-width: 0; max-width: 100%; }
+  .listing-table th > *, .listing-table td > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .listing-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .listing-table tr { display: grid; gap: .6rem; margin-bottom: .8rem; padding: .85rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+  .listing-table th, .listing-table td { display: grid; grid-template-columns: minmax(5.5rem, 30%) minmax(0, 1fr); gap: .7rem; padding: .2rem 0; border: 0; text-align: left; overflow-wrap: anywhere; }
+  .listing-table tbody th { font-weight: 650; }
+  .listing-table [data-label]::before { content: attr(data-label); color: var(--muted); font-size: .78rem; font-weight: 600; }
+  .listing-table .listing-empty { display: block; text-align: left; }
+  .listing-table .listing-empty::before { content: none; }
+  .listing-table .listing-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .4rem; white-space: normal; }
+  .listing-table .listing-actions .listing-action { white-space: normal; }
+  .listing-table .listing-actions::before { margin-right: auto; }
+  .account-filters { align-items: stretch; flex-direction: column; }
+  .account-filters input, .account-filters select { width: 100%; }
+  .account-detail-list { grid-template-columns: minmax(5.5rem, 30%) minmax(0, 1fr); }
+}

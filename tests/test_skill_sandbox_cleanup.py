@@ -1,13 +1,22 @@
 import io
-import subprocess
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 
-from scripts.skill_sandbox import run_skill
+from scripts.skill_sandbox import _valid_browser_headers, run_skill
 
 
 class SkillSandboxCleanupTests(SimpleTestCase):
+    def test_set_cookie_list_is_allowed_only_for_owner_handoff(self):
+        headers = {"set-cookie": ["session=synthetic; Path=/", "csrf=synthetic; Path=/"]}
+        self.assertTrue(_valid_browser_headers(headers, browser_handoff=True))
+        self.assertFalse(_valid_browser_headers(headers, browser_handoff=False))
+
+    def test_cookie_lists_are_rejected_for_other_headers_and_when_unbounded(self):
+        self.assertFalse(_valid_browser_headers({"location": ["/private"]}, browser_handoff=True))
+        self.assertFalse(_valid_browser_headers({"set-cookie": ["x=y"] * 17}, browser_handoff=True))
+        self.assertFalse(_valid_browser_headers({"set-cookie": ["x=" + "a" * 4097]}, browser_handoff=True))
+
     def process(self):
         process = MagicMock()
         process.stdin = io.BytesIO()

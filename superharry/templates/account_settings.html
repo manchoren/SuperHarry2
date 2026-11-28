@@ -1,24 +1,73 @@
 {% extends 'memories/base.html' %}
+{% load static %}
 {% block title %}Settings{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'superharry/settings.css' %}">{% endblock %}
 {% block content %}
-<h1>Settings</h1>
-{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-{% if notice %}<p role="status">{{ notice }}</p>{% endif %}
-<h2>Profile image</h2>
-<form method="post" enctype="multipart/form-data">{% csrf_token %}
-  <input type="hidden" name="action" value="avatar">
-  <label for="avatar">PNG or JPEG image</label>
-  <input id="avatar" name="avatar" type="file" accept="image/png,image/jpeg" required>
-  <button type="submit">Update image</button>
-</form>
-<form method="post">{% csrf_token %}<button name="action" value="remove-avatar" type="submit">Remove image</button></form>
-<h2>Change password</h2>
-<form method="post">{% csrf_token %}
-  <input type="hidden" name="action" value="password">
-  {{ password_form.as_p }}
-  <button type="submit">Change password</button>
-</form>
-<h2>Agent guidance</h2>
-<p>These general instructions guide the agent. Application permissions and safeguards are enforced separately.</p>
-<pre style="white-space: pre-wrap">{{ soul }}</pre>
+<header class="settings-heading">
+  <h1>Settings</h1>
+  <p class="muted">Manage your profile, password, and agent guidance.</p>
+</header>
+
+<div class="settings-grid">
+  <section class="settings-card" aria-labelledby="profile-heading">
+    <h2 id="profile-heading">Profile</h2>
+    {% if profile_error %}<p class="settings-feedback" role="alert">{{ profile_error }}</p>{% endif %}
+    {% if profile_notice %}<p class="settings-feedback" role="status">{{ profile_notice }}</p>{% endif %}
+    <div class="profile-preview">
+      {% if has_avatar %}<img id="saved-avatar" class="user-avatar" src="{% url 'account-avatar' %}" alt="Current profile image">{% endif %}
+      <span id="avatar-initial" class="user-avatar avatar-initial" aria-label="Initials {{ avatar_initial|first|upper }}" {% if has_avatar %}hidden{% endif %}>{{ avatar_initial|first|upper }}</span>
+      <img id="selected-avatar-preview" class="user-avatar" alt="Selected profile image preview" hidden>
+    </div>
+    <p id="avatar-guidance" class="muted">Choose a PNG or JPEG image. Maximum file size: {{ avatar_max_mb|floatformat:1 }} MB ({{ avatar_max_bytes }} bytes).</p>
+    <form id="avatar-form" method="post" enctype="multipart/form-data" class="profile-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="avatar">
+      <label for="avatar">Profile image</label>
+      <input id="avatar" name="avatar" type="file" accept="image/png,image/jpeg" aria-describedby="avatar-guidance" required>
+      <div class="profile-actions">
+        <div class="profile-primary-actions">
+          <button type="submit">Update image</button>
+          <button id="cancel-avatar-selection" class="subtle-button" type="button" hidden>Cancel selection</button>
+        </div>
+        {% if has_avatar %}
+          <button class="subtle-button profile-remove-button" name="action" value="remove-avatar" type="submit" form="remove-avatar-form">Remove image</button>
+        {% endif %}
+      </div>
+    </form>
+    {% if has_avatar %}
+      <form id="remove-avatar-form" method="post" class="visually-hidden">{% csrf_token %}</form>
+    {% endif %}
+  </section>
+
+  <section class="settings-card" aria-labelledby="password-heading">
+    <h2 id="password-heading">Change password</h2>
+    {% if password_notice %}<p class="settings-feedback" role="status">{{ password_notice }}</p>{% endif %}
+    <form method="post" class="password-form" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="action" value="password">
+      {% if password_form.non_field_errors %}<div class="field-errors" role="alert">{{ password_form.non_field_errors }}</div>{% endif %}
+      {% for field in password_form %}
+        <div class="password-field">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <input type="password" name="{{ field.html_name }}" id="{{ field.id_for_label }}" autocomplete="{{ field.field.widget.attrs.autocomplete|default:'current-password' }}"{% if field.field.required %} required{% endif %}{% if field.errors %} aria-invalid="true" aria-describedby="{{ field.id_for_label }}-errors{% if field.help_text %} {{ field.id_for_label }}-help{% endif %}"{% elif field.help_text %} aria-describedby="{{ field.id_for_label }}-help"{% endif %}>
+          {% if field.help_text %}<div class="field-help" id="{{ field.id_for_label }}-help">{{ field.help_text|safe }}</div>{% endif %}
+          {% if field.errors %}<div class="field-errors" id="{{ field.id_for_label }}-errors" role="alert">{{ field.errors }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      <label class="show-password-control" for="show-passwords">
+        <input id="show-passwords" type="checkbox">
+        <span>Show passwords</span>
+      </label>
+      <button type="submit">Change password</button>
+    </form>
+  </section>
+
+  <section class="settings-card agent-card" aria-labelledby="agent-heading">
+    <h2 id="agent-heading">Agent</h2>
+    <p class="muted">SOUL.md contains general agent guidance. Application permissions and safeguards are enforced separately.</p>
+    <label for="soul-viewer">Current repository-managed SOUL.md (read only)</label>
+    <textarea id="soul-viewer" class="soul-viewer" rows="16" readonly aria-readonly="true">{{ soul }}</textarea>
+  </section>
+</div>
 {% endblock %}
+{% block extra_scripts %}<script defer src="{% static 'superharry/settings.js' %}"></script>{% endblock %}

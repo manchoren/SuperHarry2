@@ -1,33 +1,56 @@
-﻿{% extends 'memories/base.html' %}
+{% extends 'memories/base.html' %}
 {% load tz %}
 {% block title %}Schedules{% endblock %}
 {% block content %}
 <h1>Schedules</h1>
-
-  {% for schedule in schedules %}
-    <article>
-      <h2>Scheduled task #{{ schedule.pk }}</h2>
-      {% if schedule.created_by_id %}<p>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</p>{% endif %}
-      <p>{{ schedule.prompt }}</p>
-      <p><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></p>
-      {% if schedule.canceled %}<p>Canceled</p>
-      {% elif schedule.next_run %}<p>Next: {% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
-      {% else %}<p>Submitted or finished</p>{% endif %}
-      <p>Latest outcome: {% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"None yet" }}{% endif %}</p>
-      <p>Preferred model: {{ schedule.preferred_model|default:"Use active model" }}</p>
-      {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
-        <form method="post" action="{% url 'schedule-model' schedule.pk %}">
-          {% csrf_token %}<label>Model <select name="model"><option value="">Use active model</option>
-          {% if schedule.preferred_model and schedule.preferred_model not in routes %}<option value="{{ schedule.preferred_model }}" selected disabled>{{ schedule.preferred_model }} (unavailable)</option>{% endif %}
-          {% for route in routes %}<option value="{{ route }}"{% if route == schedule.preferred_model %} selected{% endif %}>{{ route }}</option>{% endfor %}</select></label>
-          <button type="submit">Save model</button>
-        </form>
-      {% endif %}
-      {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
-        <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
-          {% csrf_token %}<input type="hidden" name="return_to" value="menu"><button type="submit">Cancel schedule</button>
-        </form>
-      {% endif %}
-    </article>
-  {% empty %}<p>No schedules yet.</p>{% endfor %}
+{% if schedules %}
+  <div class="listing-table-scroll" role="region" aria-label="Scheduled tasks" tabindex="0" style="overflow-x:auto;">
+    <table class="listing-table">
+      <caption>Your scheduled tasks</caption>
+      <thead>
+        <tr>
+          <th scope="col">Task</th>
+          <th scope="col">Prompt</th>
+          <th scope="col">Conversation</th>
+          <th scope="col">Status</th>
+          <th scope="col">Next execution</th>
+          <th scope="col">Latest outcome</th>
+          <th scope="col">Preferred model</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for schedule in schedules %}
+        <tr>
+          <th scope="row" data-label="Task"><a class="listing-detail-link" href="{% url 'schedule-detail' schedule.pk %}">Scheduled task #{{ schedule.pk }}</a>
+            {% if schedule.created_by_id %}<br><small>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</small>{% endif %}
+          </th>
+          <td data-label="Prompt">{{ schedule.prompt|truncatechars:120 }}</td>
+          <td data-label="Conversation"><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></td>
+          <td data-label="Status"><span class="listing-status">{% if schedule.canceled %}Canceled{% elif schedule.running %}Running{% elif schedule.next_run %}Scheduled{% else %}Submitted or finished{% endif %}</span></td>
+          <td data-label="Next execution">{% if schedule.next_run %}{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }}){% else %}—{% endif %}</td>
+          <td data-label="Latest outcome">{% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"None yet" }}{% endif %}</td>
+          <td data-label="Preferred model">{{ schedule.preferred_model|default:"Use active model" }}</td>
+          <td data-label="Actions" class="listing-actions">
+            <a class="listing-detail-link" href="{% url 'schedule-detail' schedule.pk %}">View details</a>
+            {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
+              <form method="post" action="{% url 'schedule-model' schedule.pk %}">
+                {% csrf_token %}<label>Model <select name="model"><option value="">Use active model</option>
+                {% if schedule.preferred_model and schedule.preferred_model not in routes %}<option value="{{ schedule.preferred_model }}" selected disabled>{{ schedule.preferred_model }} (unavailable)</option>{% endif %}
+                {% for route in routes %}<option value="{{ route }}"{% if route == schedule.preferred_model %} selected{% endif %}>{{ route }}</option>{% endfor %}</select></label>
+                <button class="listing-action" type="submit">Save model</button>
+              </form>
+              <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
+                {% csrf_token %}<input type="hidden" name="return_to" value="menu"><button class="listing-action listing-danger-action" type="submit">Cancel schedule</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>No schedules yet.</p>
+{% endif %}
 {% endblock %}
