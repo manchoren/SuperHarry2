@@ -2,6 +2,16 @@
 
 ## Current status
 
+Owner decision (2026-11-27): retain the existing block on identifiable
+purchases, payments, transfers and payment-card handling, even with approval.
+The owner accepts that a malicious site can conceal an effect, so this is a
+bounded, marker-based control rather than a universal guarantee. The agent must
+not solicit payment information or prepare fraudulent actions; fraud detection
+also has semantic limits. The explicit instruction against fraud is model
+guidance, not a deterministic fraud detector. Each supported external action
+still requires exact, one-use owner approval and uncertainty stops dispatch.
+Purchases with approval are deferred to separate work.
+
 The optional HTTPS owner handoff supports one model-prepared, native
 URL-encoded POST for an explicit action request attached to a public URL task.
 The owner must approve the browser task with HTTPS handoff enabled and then take
@@ -25,6 +35,20 @@ uncertain requests fail closed. No action result claims rollback. Payment,
 purchase, transfer, banking, wallet, and card-related activity stays blocked,
 including stored-payment markers.
 
+Historical GitHub tracking update (superseded by the owner decision above): #70 was `needs-info` pending an owner
+decision on the conflict between its absolute prohibition and generic website
+actions. A remote site controls the server-side meaning of its form fields: a
+neutral destination and visible field such as `continue` or `x12=default` may
+trigger a stored-method charge without exposing payment semantics in the page.
+The host can reject known payment markers and uncertain plans, but cannot prove
+that every arbitrary site action is not a payment. More marker tests improve
+known-case coverage; they cannot prove the universal criterion. Until the owner
+chooses a trusted-site policy, authorizes a bounded marker-based criterion, or
+asks for a redesign that disables generic external-action dispatch, criterion
+3 remains partial. This leaves #70 open and blocks closure of parent #65,
+including its action-dependent stories 16–20; it does not invalidate the
+completed issues #66–#69.
+
 Normal browsing and search retain the accepted GET-only contract for #67:
 they do not click links or submit forms. The explicit manual owner handoff is a
 separate workflow. A website could still attach side effects to a GET request;
@@ -36,11 +60,24 @@ that limitation remains recorded under #66.
 | --- | --- | --- |
 | Present each external action and destination for owner review and approval or rejection | Implemented for the supported form slice | The agent prepares visible text fields from the explicit request. Method, destination, page labels, and exact values appear in the owner-only panel before dispatch. Unsupported forms fail closed. |
 | Stop on uncertain effects; enforce decisions outside model instructions | Implemented with documented semantic limits | The model can return uncertain; malformed plans, unsupported fields, and unsafe destinations fail closed. The host binds the decision to the immutable request digest and dispatches only after owner approval. Page instructions are treated as untrusted. Site-specific semantics still require owner inspection. |
-| Block purchases, payments, transfers, and card data regardless of approval | Partial: covered markers are blocked, but site-specific semantics cannot be proven | URL, labels, camelCase and concatenated field names, values, and the user's requested action are checked. Hidden redirect parameters on sign-in are rejected; submitted bodies must match visible controls and hidden non-CSRF/duplicate fields fail closed. Card-like 12 to 19 digit values are blocked when separated by spaces, periods, underscores, slashes, colons, or hyphens, including during sign-in. This remains marker-based classification and cannot prove the effect of every website. |
+| Block identifiable purchases, payments, transfers, and card data regardless of approval | Passed within the owner-accepted bounded policy | URL, labels, field names, values and the requested action are checked; card-like numbers and stored-payment markers are blocked. This marker-based control cannot establish the effects of every website. The agent is instructed not to prepare fraudulent actions; this is model guidance, not guaranteed detection. |
 | Controlled approval, denial, uncertainty, adversarial content, bypass, and payment tests | Passed for the supported path | Tests cover no request before exact approval, denial with no network call, wrong digest/replay, uncertain plans, adversarial page instructions, camelCase and lowercase stored-payment identifiers, numeric card-like values using spaces, periods, slashes, or colons, hidden opaque fields and login redirects, unsupported formats, payment-labelled GET links, and GET form/button submissions. A neutral `/api/submit` carrying `paymentmethodid=stored-card` is blocked before the network adapter and before an approval proposal. |
 | Complete Docker chat-to-action-review flow | Passed on Docker Desktop with a synthetic site | The worker reads a form, the model prepares a value, the adversarial page instruction is shown to the owner, and no POST reaches the fixture before exact approval. Approval sends one POST. A subsequent payment-labelled GET form is stopped before dispatch by both click and Enter, no second fixture request occurs, and the authenticated result remains available. HTTPS main-page redirects are followed as accepted in #66; a remote site may assign effects to a GET, including a redirect after a form POST. The run reports its result and cleans up. No production behavior or rollback is claimed. |
 
 ## Evidence
+
+Owner-refinement verification, 2026-11-27: checkout `334e9e3d9081fef87cb286d8309b13a66a3fb75c`
+plus the uncommitted fraud instruction and its assertion. SHA-256 of
+`superharry/browser_action_plans.py` is
+`a219d09df003a0494c309de6894870e879265e334e64c12060a0104495c848d0`;
+SHA-256 of `tests/test_browser_action_plans.py` is
+`9ad23eb18be47595680df8853d123faf30294c77aa197302a8b026347989bec1`.
+The broad command below passed **148 tests with one skip**. The opt-in Docker
+action command below passed **2 tests** on Docker Desktop Engine 29.9.3 with
+the existing `superharry-skill-browser-worker:local` image. Ruff and
+`git diff --check` passed (the latter reported an existing line-ending notice).
+The fraud assertion confirms the instruction is sent to the model; it does not
+establish reliable detection of fraud.
 
 Commands run from PowerShell on 2026-11-27:
 
@@ -146,7 +183,7 @@ This is local Docker Desktop evidence with synthetic data. It does not
 establish deployment or production acceptance, guarantee classification of
 every website's effect, or roll back an external change. Redirects after a
 sign-in POST remain followed under the accepted GET-only browsing behavior; a
-site could assign an effect to such a GET. The payment prohibition therefore
-remains **partial** for website semantics that cannot be identified from the
-available markers. The owner must inspect the page and exact request before
+site could assign an effect to such a GET. The bounded payment policy cannot
+cover website semantics that cannot be identified from available markers.
+The owner must inspect the page and exact request before
 approving a supported action.

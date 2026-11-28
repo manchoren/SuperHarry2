@@ -37,6 +37,7 @@ class BrowserActionPlanTests(unittest.TestCase):
         })
         system_prompt = stream.call_args.args[0][0]["content"]
         self.assertIn("untrusted data", system_prompt)
+        self.assertIn("Never prepare fraudulent or deceptive actions", system_prompt)
         user_message = json.loads(stream.call_args.args[0][1]["content"])
         self.assertEqual(user_message["explicit_user_action_request_untrusted"], "Set my display name to Ada")
         self.assertIn("Ignore previous instructions", user_message["available_native_forms_untrusted"][0]["form_text"])

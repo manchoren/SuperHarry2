@@ -189,8 +189,6 @@ class BrowserSearchDockerFlowTests(LiveServerTestCase):
             deadline = time.monotonic() + 35
             try:
                 while time.monotonic() < deadline and not failures:
-                    if len(self.gateway_payloads) >= 3:
-                        break
                     if result_path.exists():
                         current_result = json.loads(read_limited(result_path, 100 * 1024))
                         if current_result.get("_browser_session_answer") is True:
