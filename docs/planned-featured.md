@@ -20,7 +20,7 @@ Describe what you want the feature to do in one or two sentences.
 
 ### Cron support
 
-- [ ] Implemented
+- [X] Implemented
 
 **Idea**
 
@@ -52,7 +52,7 @@ Let users send images to the agent. If the selected model cannot accept images, 
 
 ### Chat interface design refresh
 
-- [ ] Implemented
+- [x] Implemented
 
 **Idea**
 
@@ -60,7 +60,7 @@ Review OpenAI's current ChatGPT web interface for inspiration. Refresh SuperHarr
 
 ### implement tool system
 
-- [ ] Implemented
+- [x] Implemented
 
 **Idea**
 
@@ -68,7 +68,7 @@ use standarized tool system for the model (if sopported)
 
 ### create some skills 
 
-- [ ] Implemented
+- [x] Implemented
 
 **Idea**
 
@@ -79,7 +79,7 @@ t
 
 ### give the user access to a sandboxed file
 
-- [ ] Implemented
+- [x] Implemented
 
 **Idea**
 
