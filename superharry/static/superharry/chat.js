@@ -4,6 +4,117 @@ const statusMessage = document.querySelector("#chat-status");
 const historyLink = document.querySelector("#chat-history");
 const messages = document.querySelector("#messages");
 const selectedSkill = document.querySelector("#selected-skill");
+const conversationModel = document.querySelector("#conversation-model");
+const reasoningControl = document.querySelector("#reasoning-effort");
+const reasoningLabel = document.querySelector("#reasoning-label");
+const compactContext = document.querySelector("#compact-context");
+
+compactContext?.addEventListener("click", async () => {
+  compactContext.disabled = true;
+  statusMessage.textContent = "Compacting conversation context…";
+  try {
+    const form = new FormData();
+    form.set("csrfmiddlewaretoken", document.querySelector('#composer input[name="csrfmiddlewaretoken"]')?.value || "");
+    const response = await fetch(compactContext.dataset.endpoint, {method: "POST", body: form});
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "The conversation could not be compacted.");
+    statusMessage.textContent = result.message;
+    if (result.compacted) {
+      const history = document.querySelector("#conversation-events") || (() => {
+        const section = document.createElement("section");
+        section.id = "conversation-events";
+        section.setAttribute("aria-label", "Conversation events");
+        document.querySelector("#composer")?.after(section);
+        return section;
+      })();
+      const notice = document.createElement("p");
+      notice.textContent = "Conversation context compacted manually.";
+      history.append(notice);
+    }
+  } catch (error) {
+    statusMessage.textContent = error.message;
+  } finally {
+    compactContext.disabled = false;
+  }
+});
+
+function applyReasoningOptions(option, requested = "none") {
+  if (!reasoningControl) return "none";
+  const efforts = (option?.dataset.efforts || "").split(",").filter(Boolean);
+  const choices = ["none", ...efforts];
+  reasoningControl.dataset.choices = choices.join(",");
+  reasoningControl.max = String(efforts.length);
+  reasoningControl.closest("label")?.toggleAttribute("hidden", efforts.length === 0);
+  const effort = choices.includes(requested) ? requested : "none";
+  reasoningControl.value = String(Math.max(0, choices.indexOf(effort)));
+  if (reasoningLabel) reasoningLabel.textContent = effort === "none" ? "Off" : effort[0].toUpperCase() + effort.slice(1);
+  return effort;
+}
+
+reasoningControl?.addEventListener("input", () => {
+  const choices = reasoningControl.dataset.choices.split(",");
+  const effort = choices[Number(reasoningControl.value)] || "none";
+  if (reasoningLabel) reasoningLabel.textContent = effort === "none" ? "Off" : effort[0].toUpperCase() + effort.slice(1);
+});
+
+reasoningControl?.addEventListener("change", async () => {
+  if (!reasoningControl.dataset.endpoint) return;
+  const effort = reasoningControl.dataset.choices.split(",")[Number(reasoningControl.value)] || "none";
+  const form = new FormData();
+  form.set("reasoning_effort", effort);
+  form.set("csrfmiddlewaretoken", document.querySelector('#composer input[name="csrfmiddlewaretoken"]')?.value || "");
+  const response = await fetch(reasoningControl.dataset.endpoint, {method: "POST", body: form});
+  if (!response.ok) {
+    if (statusMessage) statusMessage.textContent = (await response.json().catch(() => ({}))).error || "The reasoning setting could not be saved.";
+    window.location.reload();
+  }
+});
+
+conversationModel?.addEventListener("change", async () => {
+  const previous = conversationModel.dataset.selection;
+  const previousOption = Array.from(conversationModel.options).find((option) => option.value === previous);
+  if (!conversationModel.dataset.endpoint) {
+    conversationModel.dataset.selection = conversationModel.value;
+    applyReasoningOptions(conversationModel.selectedOptions[0]);
+    return;
+  }
+  if (!window.confirm("Changing the model can affect conversation coherence. Change it?")) {
+    conversationModel.value = previous;
+    applyReasoningOptions(previousOption);
+    return;
+  }
+  const previousEffort = reasoningControl?.dataset.choices.split(",")[Number(reasoningControl.value)] || "none";
+  const selectedEffort = applyReasoningOptions(conversationModel.selectedOptions[0], previousEffort);
+  const form = new FormData();
+  form.set("model", conversationModel.value);
+  form.set("confirmed", "1");
+  form.set("reasoning_effort", selectedEffort);
+  form.set("csrfmiddlewaretoken", document.querySelector('#composer input[name="csrfmiddlewaretoken"]')?.value || "");
+  const response = await fetch(conversationModel.dataset.endpoint, {method: "POST", body: form});
+  if (!response.ok) {
+    conversationModel.value = previous;
+    applyReasoningOptions(previousOption, previousEffort);
+    if (statusMessage) statusMessage.textContent = (await response.json()).error || "The model could not be changed.";
+    return;
+  }
+  const result = await response.json().catch(() => ({}));
+  conversationModel.dataset.selection = conversationModel.value;
+  if (reasoningControl) {
+    const selected = conversationModel.selectedOptions[0];
+    selected.dataset.efforts = (result.efforts || []).join(",");
+    applyReasoningOptions(selected, result.reasoning_effort || "none");
+  }
+  const events = document.querySelector("#conversation-events") || (() => {
+    const section = document.createElement("section");
+    section.id = "conversation-events";
+    section.setAttribute("aria-label", "Conversation events");
+    document.querySelector("#composer")?.after(section);
+    return section;
+  })();
+  const event = document.createElement("p");
+  event.textContent = `Model changed to ${conversationModel.selectedOptions[0].textContent}.`;
+  events.append(event);
+});
 selectedSkill?.addEventListener("input", () => {
   document.querySelector("#selected-skill-label").textContent = selectedSkill.value ? `Skill: ${selectedSkill.value}` : "";
 });
@@ -163,6 +274,7 @@ function appendMessage(role, text) {
 async function readReply(body, output) {
   const reader = body.pipeThrough(new TextDecoderStream()).getReader();
   let pending = "";
+  let reasoningPanel;
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -173,11 +285,39 @@ async function readReply(body, output) {
         const event = JSON.parse(line);
         if (event.error) throw new Error(event.error);
         if (event.done) return;
+        if (event.reasoning) {
+          if (!reasoningPanel) {
+            reasoningPanel = document.createElement("details");
+            reasoningPanel.className = "temporary-reasoning";
+            reasoningPanel.open = true;
+            const summary = document.createElement("summary");
+            summary.textContent = "Reasoning (temporary)";
+            const content = document.createElement("p");
+            reasoningPanel.append(summary, content);
+            output.parentElement?.before(reasoningPanel);
+          }
+          reasoningPanel.lastElementChild.append(document.createTextNode(event.reasoning));
+          continue;
+        }
+        if (event.model_event) {
+          const history = document.querySelector("#conversation-events") || (() => {
+            const section = document.createElement("section");
+            section.id = "conversation-events";
+            section.setAttribute("aria-label", "Conversation events");
+            document.querySelector("#composer")?.after(section);
+            return section;
+          })();
+          const notice = document.createElement("p");
+          notice.textContent = event.model_event;
+          history.append(notice);
+          continue;
+        }
         output.append(document.createTextNode(event.text));
       }
     }
   } finally {
     await reader.cancel();
+    reasoningPanel?.remove();
   }
 }
 
@@ -191,6 +331,9 @@ async function submitChat(event) {
   if (chatButtons[0].disabled || (sendingMessage && !input.value.trim())) return;
 
   const data = new FormData(form);
+  if (sendingMessage && reasoningControl) {
+    data.set("reasoning_effort", reasoningControl.dataset.choices.split(",")[Number(reasoningControl.value)] || "none");
+  }
   if (sendingMessage && window.chatFilePond) {
     data.delete("attachment");
     window.chatFilePond.getFiles().forEach((item) => data.append("attachment", item.file, item.filename));

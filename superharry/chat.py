@@ -24,11 +24,12 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from .gateway import GatewayFailure, available_routes
+from .gateway import GatewayFailure, available_route_catalog, available_routes
 from .gateway_worker import read_gateway_stream
+from .compaction import compact_conversation, context_messages, context_token_limit, estimate_tokens, valid_summary
 from .soul import guidance
 from .memories import relevant_memory_excerpts
-from .models import ChatInput, ChatLimits, ChatRoute, ChatSubmission, Conversation, Message, Schedule, ScheduleOccurrence, SkillArtifact
+from .models import ChatInput, ChatLimits, ChatRoute, ChatSubmission, Conversation, ConversationEvent, Message, Schedule, ScheduleOccurrence, SkillArtifact
 from .quota import AdmissionDenied, admit
 from .schedule_time import resolve_wall_time
 from .text_skills import text_skill
@@ -37,7 +38,7 @@ from .text_skills import text_skill
 _STREAM_CANCELLATION_CHECK = ContextVar("stream_cancellation_check", default=None)
 
 
-def stream_reply(messages, *, route_id, on_submit=None, tools=None):
+def stream_reply(messages, *, route_id, reasoning_effort="none", on_submit=None, tools=None):
     """Read the provider stream in a child process so cancellation can close its socket."""
     cancellation_check = _STREAM_CANCELLATION_CHECK.get()
 
@@ -50,7 +51,7 @@ def stream_reply(messages, *, route_id, on_submit=None, tools=None):
         receiver, sender = context.Pipe(duplex=False)
         process = context.Process(
             target=read_gateway_stream,
-            args=(sender, messages, route_id, tools, settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY),
+            args=(sender, messages, route_id, tools, settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, reasoning_effort),
             daemon=True,
         )
         started = False
@@ -155,6 +156,27 @@ def available_chat_skills():
         if candidate.name not in {item["name"] for item in available} and preparation_status(candidate) == "Prepared":
             available.append({"name": candidate.name, "purpose": candidate.purpose, "usage": candidate.instructions[:4000], "origin": "vm"})
     return available
+
+
+REASONING_LEVELS = ("low", "medium", "high", "xhigh")
+
+
+def route_reasoning_options(route):
+    capabilities = route.get("capabilities", {}) if isinstance(route, dict) else {}
+    if not isinstance(capabilities, dict) or not (capabilities.get("supportsThinking") is True or capabilities.get("thinking") is True):
+        return []
+    tiers = capabilities.get("effort_tiers")
+    if not isinstance(tiers, list):
+        return []
+    return [level for level in REASONING_LEVELS if level in tiers]
+
+
+def conversation_route_id(selection):
+    if selection == "auto":
+        return ChatRoute.active_id()
+    if selection == "free":
+        return settings.CHAT_MODEL
+    return selection
 
 
 SKILL_MENTION_PATTERN = re.compile(r"(?<![\w/])/([A-Za-z0-9](?:[A-Za-z0-9-]{0,46}[A-Za-z0-9])?)(?![\w/-])")
@@ -364,11 +386,44 @@ def page(request, conversation_id=None):
             has_later_attempt=Exists(later_attempts),
         ).order_by("turn_order", "pk")
     available_skills = available_chat_skills()
+    try:
+        route_catalog = available_route_catalog()
+    except GatewayFailure:
+        route_catalog = {}
+    routes = sorted(route_catalog)
+    def effort_options(route_id):
+        return route_reasoning_options(route_catalog.get(route_id, {}))
+    model_options = [
+        {"id": "auto", "label": "Auto", "efforts": effort_options(ChatRoute.active_id())},
+        {"id": "free", "label": "Free" if settings.CHAT_MODEL in routes else "Free (unavailable)", "disabled": settings.CHAT_MODEL not in routes,
+         "efforts": effort_options(settings.CHAT_MODEL)},
+    ]
+    model_options.extend({"id": route, "label": route, "efforts": effort_options(route)} for route in routes if route not in {ChatRoute.active_id(), settings.CHAT_MODEL})
+    if conversation and conversation.preferred_model not in {item["id"] for item in model_options}:
+        model_options.append({"id": conversation.preferred_model, "label": f"{conversation.preferred_model} (unavailable)", "disabled": True, "efforts": []})
+    model_selection = conversation.preferred_model if conversation else "auto"
+    selected_option = next((item for item in model_options if item["id"] == model_selection), {})
+    reasoning_options = selected_option.get("efforts", [])
+    limits = ChatLimits.objects.get(pk=1)
+    route_id = conversation_route_id(model_selection)
+    context_limit = context_token_limit(model_selection, route_id, route_catalog, limits)
+    context_rows = list(conversation.messages.filter(complete=True).order_by("pk")) if conversation else []
+    context_estimate = estimate_tokens(context_messages(conversation, context_rows)) if conversation else 0
+    context_used = min(100, int((context_estimate + limits.response_reservation_tokens) * 100 / context_limit)) if context_limit else None
     return render(request, "chat.html", {
         "conversations": conversations,
         "conversation": conversation,
         "history": history,
         "active_model": ChatRoute.active_id(),
+        "model_options": model_options,
+        "model_selection": model_selection,
+        "reasoning_options": reasoning_options,
+        "reasoning_effort": conversation.reasoning_effort if conversation and conversation.reasoning_effort in reasoning_options else "none",
+        "context_limit": context_limit,
+        "context_estimate": context_estimate,
+        "context_used_percent": context_used,
+        "response_reservation_tokens": limits.response_reservation_tokens,
+        "conversation_events": conversation.events.order_by("created_at", "pk") if conversation else (),
         "available_skills": available_skills,
         "available_skill_names": {item["name"] for item in available_skills},
         "submission_id": uuid4(),
@@ -376,6 +431,78 @@ def page(request, conversation_id=None):
             running=Exists(ScheduleOccurrence.objects.filter(schedule_id=OuterRef("pk"), status__in=("claimed", "running")))
         ) if conversation else (),
     })
+
+
+@never_cache
+@login_required
+@require_POST
+def select_conversation_model(request, conversation_id):
+    conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
+    selection = request.POST.get("model", "")
+    try:
+        route_catalog = available_route_catalog()
+    except GatewayFailure:
+        return JsonResponse({"error": "The model catalog is unavailable."}, status=503)
+    routes = set(route_catalog)
+    if selection == "free" and settings.CHAT_MODEL not in routes:
+        return JsonResponse({"error": "The Free model is unavailable."}, status=503)
+    if selection not in {"auto", "free"} and (len(selection) > 255 or selection not in routes):
+        return JsonResponse({"error": "Select a configured model."}, status=400)
+    if selection == conversation.preferred_model:
+        return HttpResponse(status=204)
+    if request.POST.get("confirmed") != "1":
+        return JsonResponse({"error": "Confirm the model change first."}, status=400)
+    route_id = conversation_route_id(selection)
+    efforts = route_reasoning_options(route_catalog.get(route_id, {}))
+    requested_effort = request.POST.get("reasoning_effort", conversation.reasoning_effort)
+    if requested_effort not in {"none", *efforts}:
+        requested_effort = "none"
+    conversation.preferred_model = selection
+    conversation.reasoning_effort = requested_effort
+    conversation.save(update_fields=("preferred_model", "reasoning_effort"))
+    label = "Auto" if selection == "auto" else "Free" if selection == "free" else selection
+    ConversationEvent.objects.create(conversation=conversation, content=f"Model changed to {label}.")
+    return JsonResponse({"efforts": efforts, "reasoning_effort": requested_effort})
+
+
+@never_cache
+@login_required
+@require_POST
+def select_conversation_reasoning(request, conversation_id):
+    conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
+    try:
+        route_catalog = available_route_catalog()
+    except GatewayFailure:
+        return JsonResponse({"error": "The model catalog is unavailable."}, status=503)
+    route_id = conversation_route_id(conversation.preferred_model)
+    effort = request.POST.get("reasoning_effort", "none")
+    if effort not in {"none", *route_reasoning_options(route_catalog.get(route_id, {}))}:
+        return JsonResponse({"error": "This model does not support that reasoning level."}, status=400)
+    conversation.reasoning_effort = effort
+    conversation.save(update_fields=("reasoning_effort",))
+    return HttpResponse(status=204)
+
+
+@never_cache
+@login_required
+@require_POST
+def compact_conversation_context(request, conversation_id):
+    conversation = get_object_or_404(Conversation, pk=conversation_id, owner=request.user)
+    route_id = conversation_route_id(conversation.preferred_model)
+    try:
+        catalog = available_route_catalog()
+    except GatewayFailure:
+        return JsonResponse({"error": "The model catalog is unavailable."}, status=503)
+    if route_id not in catalog:
+        return JsonResponse({"error": "The selected model is unavailable for compaction."}, status=503)
+    try:
+        compacted = compact_conversation(conversation, route_id)
+    except GatewayFailure as error:
+        return JsonResponse({"error": str(error)}, status=503)
+    if compacted:
+        ConversationEvent.objects.create(conversation=conversation, content="Conversation context compacted manually.")
+        return JsonResponse({"compacted": True, "message": "Conversation context compacted."})
+    return JsonResponse({"compacted": False, "message": "There are not enough older messages to compact."})
 
 
 @never_cache
@@ -485,7 +612,7 @@ class ChatOutcome:
     error: str = ""
 
 
-def execute_message(submission, route_id, max_response_characters, skill, *, scheduled=False, inputs=None, selected_skill=None, skill_mentions=None):
+def execute_message(submission, route_id, max_response_characters, skill, *, reasoning_effort="none", scheduled=False, inputs=None, selected_skill=None, skill_mentions=None):
     reply = submission.reply
     complete = False
     waiting_for_user = False
@@ -517,13 +644,13 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
             break_execution = True
         else:
             break_execution = False
-        context = list(
+        history_rows = list(
             reply.conversation.messages.filter(complete=True)
             .annotate(turn_order=Coalesce("prompt_id", "pk"))
             .filter(turn_order__lte=reply.prompt_id)
             .order_by("turn_order", "pk")
-            .values("role", "content")
         )
+        context = context_messages(reply.conversation, history_rows)
         if reply.conversation.memory_enabled:
             prompt_text = skill[1] if skill is not None else reply.prompt.content
             excerpts = relevant_memory_excerpts(submission.owner_id, prompt_text)
@@ -573,7 +700,31 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
                     + json.dumps(skill_mentions, ensure_ascii=False)
                 ),
             })
-        kwargs = {"route_id": route_id, "on_submit": submission.mark_submitted}
+        try:
+            route_catalog = available_route_catalog()
+        except GatewayFailure:
+            route_catalog = {}
+        limits = ChatLimits.objects.get(pk=1)
+        capacity = context_token_limit(reply.conversation.preferred_model, route_id, route_catalog, limits)
+        if capacity is not None and estimate_tokens(context) + limits.response_reservation_tokens > capacity:
+            if not compact_conversation(reply.conversation, route_id, limits):
+                raise GatewayFailure("This request exceeds the context limit and there are no older messages to compact.")
+            ConversationEvent.objects.create(
+                conversation=reply.conversation, content="Conversation context compacted automatically.",
+            )
+            system_context = [item for item in context if item["role"] == "system"]
+            current_user = next((item for item in reversed(context) if item["role"] == "user"), None)
+            compacted_context = context_messages(reply.conversation, history_rows)
+            if current_user is not None:
+                for item in reversed(compacted_context):
+                    if item["role"] == "user":
+                        item["content"] = current_user["content"]
+                        break
+            context = system_context + compacted_context
+            yield {"model_event": "Conversation context compacted automatically."}
+            if estimate_tokens(context) + limits.response_reservation_tokens > capacity:
+                raise GatewayFailure("The request is still too large after context compaction; the original history is intact.")
+        kwargs = {"route_id": route_id, "reasoning_effort": reasoning_effort, "on_submit": submission.mark_submitted}
         if not scheduled and skill is None:
             kwargs["tools"] = [current_schedule_tool(), DISCOVER_SKILLS_TOOL, INVOKE_SKILL_TOOL, CREATE_SKILL_TOOL, UPDATE_SKILL_TOOL, PREPARE_SKILL_TOOL]
         if scheduled and skill is None:
@@ -595,6 +746,28 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
                     if not submission_can_continue():
                         cancelled = True
                         break
+                    if isinstance(text, dict) and "effective_model" in text:
+                        if not scheduled and reply.conversation.preferred_model == "auto":
+                            effective = text["effective_model"]
+                            if effective and effective != route_id:
+                                content = f"Auto used {effective}"
+                                if reasoning_effort != "none":
+                                    try:
+                                        actual_model = available_route_catalog().get(effective, {})
+                                    except GatewayFailure:
+                                        actual_model = {}
+                                    capabilities = actual_model.get("capabilities", {}) if isinstance(actual_model, dict) else {}
+                                    if isinstance(capabilities, dict) and capabilities.get("supportsThinking") is False:
+                                        content += "; reasoning turned off for this fallback"
+                            else:
+                                content = "Auto model is unknown"
+                            ConversationEvent.objects.create(conversation=reply.conversation, content=content)
+                            yield {"model_event": content}
+                        continue
+                    if isinstance(text, dict) and "reasoning" in text:
+                        if text["reasoning"]:
+                            yield {"reasoning": text["reasoning"]}
+                        continue
                     needs_user_input = False
                     if isinstance(text, dict) and "tool_call" in text:
                         call = text["tool_call"]
@@ -999,10 +1172,10 @@ def execute_message(submission, route_id, max_response_characters, skill, *, sch
     yield ChatOutcome(status, "" if complete else error)
 
 
-def stream_message(submission, route_id, max_response_characters, skill, selected_skill=None, skill_mentions=None):
+def stream_message(submission, route_id, max_response_characters, skill, selected_skill=None, skill_mentions=None, reasoning_effort="none"):
     execution = execute_message(
         submission, route_id, max_response_characters, skill,
-        selected_skill=selected_skill, skill_mentions=skill_mentions,
+        reasoning_effort=reasoning_effort, selected_skill=selected_skill, skill_mentions=skill_mentions,
     )
     with closing(execution):
         for event in execution:
@@ -1014,8 +1187,8 @@ def stream_message(submission, route_id, max_response_characters, skill, selecte
                 yield json.dumps(event) + "\n"
 
 
-def reply_response(submission, route_id, max_response_characters, skill, selected_skill=None, skill_mentions=None):
-    content = stream_message(submission, route_id, max_response_characters, skill, selected_skill, skill_mentions)
+def reply_response(submission, route_id, max_response_characters, skill, selected_skill=None, skill_mentions=None, reasoning_effort="none"):
+    content = stream_message(submission, route_id, max_response_characters, skill, selected_skill, skill_mentions, reasoning_effort)
     next(content)
     response = StreamingHttpResponse(content, content_type="application/x-ndjson")
     conversation_id = submission.reply.conversation_id
@@ -1024,8 +1197,8 @@ def reply_response(submission, route_id, max_response_characters, skill, selecte
     return response
 
 
-def start_submission(request, identity, create_reply, prompt_text, selected_skill=None, skill_mentions=None):
-    route_id = ChatRoute.active_id()
+def start_submission(request, identity, create_reply, prompt_text, selected_skill=None, skill_mentions=None, route_id=None, reasoning_effort="none"):
+    route_id = route_id or ChatRoute.active_id()
     if not all((settings.OMNIROUTE_URL, settings.OMNIROUTE_API_KEY, route_id)):
         return JsonResponse({"error": "The model gateway is not configured."}, status=503)
     provided_key = request.POST.get("submission_id") or request.headers.get("Idempotency-Key")
@@ -1045,7 +1218,7 @@ def start_submission(request, identity, create_reply, prompt_text, selected_skil
     if response_limit is None:
         location = reverse("chat-history", args=(submission.reply.conversation_id,))
         return HttpResponse(status=204, headers={"Location": location})
-    return reply_response(submission, route_id, response_limit, skill, selected_skill, skill_mentions)
+    return reply_response(submission, route_id, response_limit, skill, selected_skill, skill_mentions, reasoning_effort)
 
 
 @never_cache
@@ -1058,6 +1231,23 @@ def send(request, conversation_id=None):
         if conversation_id is not None
         else None
     )
+    model_selection = conversation.preferred_model if conversation else request.POST.get("model", "auto")
+    try:
+        route_catalog = available_route_catalog()
+    except GatewayFailure:
+        return JsonResponse({"error": "The model catalog is unavailable."}, status=503)
+    routes = set(route_catalog)
+    if model_selection == "free" and settings.CHAT_MODEL not in routes:
+        return JsonResponse({"error": "The Free model is unavailable."}, status=503)
+    if model_selection not in {"auto", "free"} and (len(model_selection) > 255 or model_selection not in routes):
+        return JsonResponse({"error": "Select a configured model."}, status=400)
+    if model_selection == "auto" and ChatRoute.active_id() not in routes:
+        return JsonResponse({"error": "The active model is unavailable."}, status=503)
+    route_id = conversation_route_id(model_selection)
+    efforts = route_reasoning_options(route_catalog.get(route_id, {}))
+    reasoning_effort = request.POST.get("reasoning_effort", conversation.reasoning_effort if conversation else "none")
+    if reasoning_effort not in {"none", *efforts}:
+        return JsonResponse({"error": "This model does not support that reasoning level."}, status=400)
     text = request.POST.get("message", "").strip()
     if not text:
         return JsonResponse({"error": "Enter a message."}, status=400)
@@ -1090,8 +1280,13 @@ def send(request, conversation_id=None):
     memory_enabled = conversation is None and request.POST.get("memory_enabled") == "on"
     def create_reply():
         target = conversation or conversations.create(
-            owner=request.user, title=text[:100], memory_enabled=memory_enabled
+            owner=request.user, title=text[:100], memory_enabled=memory_enabled,
+            preferred_model=model_selection,
+            reasoning_effort=reasoning_effort,
         )
+        if conversation is not None and conversation.reasoning_effort != reasoning_effort:
+            conversation.reasoning_effort = reasoning_effort
+            conversation.save(update_fields=("reasoning_effort",))
         prompt = target.messages.create(
             role=Message.Role.USER,
             content=text,
@@ -1113,7 +1308,8 @@ def send(request, conversation_id=None):
         identity += (tuple((name, sha256(payload).hexdigest()) for name, payload, _ in attachment_data),)
     if memory_enabled:
         identity += (True,)
-    return start_submission(request, identity, create_reply, text, selected_skill, skill_mentions)
+    identity += ("reasoning", reasoning_effort)
+    return start_submission(request, identity, create_reply, text, selected_skill, skill_mentions, route_id, reasoning_effort)
 
 
 @never_cache
@@ -1154,4 +1350,8 @@ def retry(request, conversation_id, reply_id):
         attempt.prompt.content,
         selected_skill,
         skill_mentions,
+        (ChatRoute.active_id() if attempt.conversation.preferred_model == "auto" else settings.CHAT_MODEL)
+        if attempt.conversation.preferred_model in {"auto", "free"}
+        else attempt.conversation.preferred_model,
+        attempt.conversation.reasoning_effort,
     )

@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 
 const base = "http://127.0.0.1:20128";
 const model = "google/gemma-4-26b-a4b-it:free";
@@ -121,7 +122,99 @@ async function bootstrap(input) {
       if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
-  return { inference, management, provisioning, route, verified };
+  let localRoute = "";
+  if (input.ollama?.available && input.ollama?.model) {
+    const modelName = input.ollama.model;
+    const prefix = "superharry-local";
+    const baseUrl = "http://host.docker.internal:11434/v1";
+    const nodesResponse = await request("/api/provider-nodes", { token: management });
+    const nodes = Array.isArray(nodesResponse.data.nodes) ? nodesResponse.data.nodes : [];
+    let node = nodes.find((item) => item.name === "SuperHarry2 Ollama");
+    if (node && (node.prefix !== prefix || node.baseUrl !== baseUrl || node.apiType !== "chat")) {
+      throw new Error("The existing SuperHarry2 Ollama node has a different configuration.");
+    }
+    if (!node) {
+      const created = await request("/api/provider-nodes", {
+        method: "POST", token: management,
+        payload: {name: "SuperHarry2 Ollama", prefix, type: "openai-compatible", apiType: "chat", baseUrl},
+      });
+      node = created.data.node;
+    }
+    if (!node?.id) throw new Error("OmniRoute did not return the local provider node.");
+
+    const providersResponse = await request("/api/providers", { token: management });
+    const connections = Array.isArray(providersResponse.data.connections) ? providersResponse.data.connections : [];
+    let connection = connections.find((item) => item.provider === node.id);
+    if (!connection) {
+      // OmniRoute 3.8.53 requires a credential record for keyless compatible nodes.
+      const created = await request("/api/providers", {
+        method: "POST", cookie, payload: {
+          provider: node.id, name: "SuperHarry2 local Ollama",
+          apiKey: `local-${crypto.randomUUID()}`,
+        },
+      });
+      connection = created.data.connection;
+    }
+    if (!connection?.id) throw new Error("OmniRoute did not return the local provider connection.");
+
+    const customModels = await request(`/api/provider-models?provider=${encodeURIComponent(node.id)}`, { token: management });
+    const knownModels = Array.isArray(customModels.data.models) ? customModels.data.models : [];
+    if (!knownModels.some((item) => item.id === modelName)) {
+      await request("/api/provider-models", {
+        method: "POST", token: management,
+        payload: {provider: node.id, modelId: modelName, modelName, isFree: false},
+      });
+    }
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const models = await request("/v1/models", { token: inference });
+        const id = `${prefix}/${modelName}`;
+        if (models.data.data.some((item) => item.id === id)) {
+          localRoute = id;
+          break;
+        }
+      } catch {
+        // The connection test and model catalog refresh run asynchronously.
+      }
+      if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    provisioning.ollama = localRoute ? "ready" : "route-unavailable";
+  } else {
+    provisioning.ollama = input.ollama?.model ? "unavailable" : "not-configured";
+  }
+  const autoTargets = [
+    ...(verified ? [route] : []),
+    ...(localRoute ? [localRoute] : []),
+  ];
+  let autoRoute = "";
+  if (autoTargets.length) {
+    const name = "superharry-auto";
+    const combosResponse = await request("/api/combos", { token: management });
+    const combos = Array.isArray(combosResponse.data.combos) ? combosResponse.data.combos : [];
+    const existing = combos.find((item) => item.name === name);
+    const expected = { name, displayName: "SuperHarry2 Auto", models: autoTargets, strategy: "priority",
+      config: { maxRetries: 0, zeroLatencyOptimizationsEnabled: false, reasoningTransportFallback: "drop" } };
+    if (existing) {
+      const actualTargets = Array.isArray(existing.models) ? existing.models.map((item) => typeof item === "string" ? item : item.model) : [];
+      if (JSON.stringify(actualTargets) !== JSON.stringify(autoTargets) || existing.strategy !== "priority"
+          || existing.config?.zeroLatencyOptimizationsEnabled !== false || existing.config?.maxRetries !== 0
+          || existing.config?.reasoningTransportFallback !== "drop" || existing.isActive === false) {
+        await request(`/api/combos/${encodeURIComponent(existing.id)}`, {method: "PUT", token: management, payload: expected});
+      }
+    } else {
+      await request("/api/combos", { method: "POST", token: management, payload: expected });
+    }
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const models = await request("/v1/models", { token: inference });
+        if (models.data.data.some((item) => item.id === name)) { autoRoute = name; break; }
+      } catch {
+        // The combo catalog may refresh asynchronously after a write.
+      }
+      if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return { inference, management, provisioning, route, verified, localRoute, autoRoute, autoTargets };
 }
 
 bootstrap(JSON.parse(fs.readFileSync(0, "utf8"))).then(

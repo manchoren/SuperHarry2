@@ -1,6 +1,8 @@
 services:
   omniroute:
     image: cheaperinference/omniroute:3.8.53@sha256:b52a17661a1aff42ffb78f349f423e986dfc55b57274f28559f8387622ef8ee4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATA_DIR: /app/data
       REQUIRE_API_KEY: "true"

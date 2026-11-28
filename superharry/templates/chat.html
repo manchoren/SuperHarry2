@@ -106,6 +106,10 @@
             <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg>
             <span>Conversation files</span>
           </a>
+          <span class="context-doughnut" role="img" aria-label="{% if context_limit %}Approximate context: {{ context_estimate }} used, {{ response_reservation_tokens }} reserved, {{ context_limit }} capacity{% else %}Context capacity unknown{% endif %}"{% if context_used_percent != None %} style="--context-used: {{ context_used_percent }}%"{% endif %}>
+            <span>{% if context_limit %}~{{ context_estimate }} / {{ context_limit }}{% else %}Context unknown{% endif %}</span>
+          </span>
+          <button type="button" id="compact-context" class="composer-action" data-endpoint="{% url 'conversation-compact' conversation.pk %}">Compact context</button>
           <span class="conversation-memory-state" title="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}" aria-label="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}">
             <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#brain"></use></svg>
             <span class="visually-hidden">Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}</span>
@@ -125,9 +129,19 @@
         </details>
         <span id="selected-skill-label" class="selected-skill-label" aria-live="polite"></span>
         <span class="composer-model" aria-label="Active model">Model: {{ active_model|default:"Not configured" }}</span>
+        <label class="composer-model" for="conversation-model">Model
+          <select id="conversation-model" name="model" data-selection="{{ model_selection }}"{% if conversation %} data-endpoint="{% url 'conversation-model' conversation.pk %}"{% endif %}>
+          {% for option in model_options %}<option value="{{ option.id }}" data-efforts="{% for effort in option.efforts %}{{ effort }}{% if not forloop.last %},{% endif %}{% endfor %}"{% if option.id == model_selection %} selected{% endif %}{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="composer-model reasoning-control" for="reasoning-effort"{% if not reasoning_options %} hidden{% endif %}>Reasoning
+          <input id="reasoning-effort" type="range" name="reasoning_effort" min="0" max="{{ reasoning_options|length }}" step="1" value="{% if reasoning_effort == 'none' %}0{% else %}{% for option in reasoning_options %}{% if option == reasoning_effort %}{{ forloop.counter }}{% endif %}{% endfor %}{% endif %}" data-choices="none{% for option in reasoning_options %},{{ option }}{% endfor %}"{% if conversation %} data-endpoint="{% url 'conversation-reasoning' conversation.pk %}"{% endif %}>
+          <output id="reasoning-label">{% if reasoning_effort == 'none' %}Off{% else %}{{ reasoning_effort|capfirst }}{% endif %}</output>
+        </label>
         <button type="submit">Send</button>
       </div>
     </form>
+    {% if conversation_events %}<section id="conversation-events" aria-label="Conversation events">{% for event in conversation_events %}<p>{{ event.content }}</p>{% endfor %}</section>{% endif %}
   </main>
   <aside id="file-preview" class="file-preview" aria-label="File preview" hidden>
     <header><h2 id="preview-name">File preview</h2><button type="button" id="preview-close">Close preview</button></header>

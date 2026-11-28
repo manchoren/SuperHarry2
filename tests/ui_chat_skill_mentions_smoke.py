@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from wsgiref.simple_server import make_server
@@ -20,6 +21,13 @@ import django
 
 django.setup()
 
+# Keep the HTTP/browser smoke process single-threaded on Windows; the focused
+# gateway contract tests cover the production child-process stream reader.
+import superharry.chat
+from superharry.gateway import stream_reply
+
+superharry.chat.stream_reply = stream_reply
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles.handlers import StaticFilesHandler
@@ -33,12 +41,27 @@ gateway_requests = []
 
 
 class Gateway(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"data": [
+            {"id": "test/alternate", "capabilities": {
+                "supportsThinking": True, "thinking": True, "effort_tiers": ["low", "medium"],
+            }},
+            {"id": "test/free-model", "capabilities": {"supportsThinking": False, "thinking": False}},
+            {"id": "test/skill-mentions"},
+        ]}).encode())
+
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         gateway_requests.append(payload)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"reasoning":"Temporary thought"}}]}\n\n')
+        self.wfile.flush()
+        time.sleep(0.5)
         self.wfile.write(b'data: {"choices":[{"delta":{"content":"Synthetic reply"}}]}\n\n')
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
@@ -74,6 +97,11 @@ try:
 
         message = page.locator("#message")
         suggestions = page.get_by_role("listbox", name="Skill suggestions")
+        page.locator("#conversation-model").select_option("test/alternate")
+        reasoning = page.get_by_label("Reasoning")
+        assert reasoning.is_visible()
+        reasoning.fill("2")
+        assert page.locator("#reasoning-label").inner_text() == "Medium"
         message.fill("Please mention /summ")
         suggestions.wait_for(state="visible")
         page.keyboard.press("ArrowDown")
@@ -103,8 +131,16 @@ try:
         assert page.locator("#message-highlights .skill-mention.is-unavailable").is_visible()
 
         page.locator("#composer").get_by_role("button", name="Send").click()
+        page.locator(".temporary-reasoning").get_by_text("Temporary thought").wait_for(state="visible")
+        assert page.locator(".temporary-reasoning").is_visible()
+        page.locator(".temporary-reasoning").wait_for(state="detached")
         page.wait_for_url("**/chat/*/")
         assert page.locator('[aria-label="Memory: Off"]').is_visible()
+        assert page.locator("#reasoning-effort").input_value() == "2"
+        assert page.locator("#reasoning-label").inner_text() == "Medium"
+        assert "Context unknown" in page.locator(".context-doughnut").inner_text()
+        page.locator("#compact-context").click()
+        page.get_by_text("There are not enough older messages to compact.").wait_for(state="visible")
         assert page.locator("#composer a", has_text="Conversation files").is_visible()
         assert page.locator("#messages").get_by_text(
             "Please use /summarize and /not-ready, then /summarize again.", exact=True
@@ -113,10 +149,21 @@ try:
         unavailable = page.locator("#messages .skill-mention.is-unavailable")
         assert unavailable.is_visible()
         assert unavailable.get_attribute("aria-label") == "/not-ready, unavailable"
+        assert gateway_requests[0]["model"] == "test/alternate"
+        assert gateway_requests[0]["reasoning_effort"] == "medium"
+        assert "Temporary thought" not in page.locator("#messages").inner_text()
+        skill_request = gateway_requests[0]
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator("#conversation-model").select_option("free")
+        page.get_by_text("Model changed to Free.").wait_for(state="visible")
+        message.fill("Follow-up on Free")
+        page.locator("#composer").get_by_role("button", name="Send").click()
+        page.wait_for_function("() => document.querySelector('#message').value === ''")
+        assert gateway_requests[-1]["model"] == "test/skill-mentions"
 
         context = next(
             item["content"]
-            for item in gateway_requests[-1]["messages"]
+            for item in skill_request["messages"]
             if "prompt mentions these skills" in item["content"]
         )
         descriptions = json.loads(context.split("Mentions: ", 1)[1])
@@ -124,7 +171,7 @@ try:
         assert descriptions[0]["available"] is True
         assert descriptions[1]["available"] is False
         browser.close()
-    print("PASS: skill mention suggestions, keyboard/mouse selection, highlighting, persistence, unavailable reporting, and mobile layout")
+    print("PASS: model selection and confirmation, reasoning and temporary reasoning, context estimate and manual-compaction no-op, skill mentions, persistence, unavailable reporting, and mobile layout")
 finally:
     server.shutdown()
     server.server_close()

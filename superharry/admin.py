@@ -26,7 +26,9 @@ admin.site.unregister(Group)
 
 @admin.register(ChatLimits)
 class ChatLimitsAdmin(admin.ModelAdmin):
-    list_display = ("daily_messages", "max_response_characters", "max_active_schedules")
+    list_display = ("daily_messages", "max_response_characters", "max_active_schedules",
+                    "response_reservation_tokens", "auto_context_window_tokens",
+                    "unknown_context_window_tokens", "preserve_first_messages", "preserve_recent_messages")
 
     def has_add_permission(self, request):
         return False

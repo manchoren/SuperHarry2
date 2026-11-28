@@ -75,6 +75,7 @@ STATIC_ROOT = Path(__file__).resolve().parent.parent / "staticfiles"
 
 OMNIROUTE_URL = os.environ.get("OMNIROUTE_URL", "")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "")
+AUTO_CHAT_MODEL = os.environ.get("AUTO_CHAT_MODEL", CHAT_MODEL)
 CSV_SPOOL = os.environ.get("CSV_SPOOL", "")
 SKILL_SPOOL = os.environ.get("SKILL_SPOOL", "")
 inference_key_file = os.environ.get("OMNIROUTE_API_KEY_FILE")

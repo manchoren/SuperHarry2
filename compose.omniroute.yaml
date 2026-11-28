@@ -3,6 +3,7 @@ services:
     environment:
       OMNIROUTE_URL: ${OMNIROUTE_URL:?Set the OmniRoute base URL}
       CHAT_MODEL: ${CHAT_MODEL:?Set the canonical OmniRoute route ID}
+      AUTO_CHAT_MODEL: ${AUTO_CHAT_MODEL:-${CHAT_MODEL}}
       OMNIROUTE_API_KEY_FILE: /run/secrets/omniroute_api_key
     secrets:
       - omniroute_api_key
@@ -10,6 +11,7 @@ services:
     environment:
       OMNIROUTE_URL: ${OMNIROUTE_URL:?Set the OmniRoute base URL}
       CHAT_MODEL: ${CHAT_MODEL:?Set the canonical OmniRoute route ID}
+      AUTO_CHAT_MODEL: ${AUTO_CHAT_MODEL:-${CHAT_MODEL}}
       OMNIROUTE_API_KEY_FILE: /run/secrets/omniroute_api_key
     secrets:
       - omniroute_api_key

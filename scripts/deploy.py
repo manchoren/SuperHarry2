@@ -32,6 +32,12 @@ def deployment_environment():
             raise RuntimeError("Set CHAT_MODEL or provision the existing gateway first (python scripts/provision.py).") from None
     if not env["CHAT_MODEL"]:
         raise RuntimeError("CHAT_MODEL must not be empty.")
+    if not env.get("AUTO_CHAT_MODEL"):
+        auto_route_path = ROOT / ".secrets" / "omniroute_auto_route"
+        try:
+            env["AUTO_CHAT_MODEL"] = auto_route_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            env["AUTO_CHAT_MODEL"] = env["CHAT_MODEL"]
     return env
 
 

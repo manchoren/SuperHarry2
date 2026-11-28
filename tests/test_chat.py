@@ -1145,6 +1145,8 @@ class ChatTests(TestCase):
         admin.force_login(get_user_model().objects.create_superuser(username="limit-admin"))
         result = admin.post("/admin/superharry/chatlimits/1/change/", {
             "daily_messages": 50, "max_response_characters": 12000, "max_active_schedules": 1,
+            "response_reservation_tokens": 2048, "auto_context_window_tokens": 8192,
+            "unknown_context_window_tokens": "", "preserve_first_messages": 1, "preserve_recent_messages": 3,
         })
         self.assertEqual(result.status_code, 302)
         conversation = Conversation.objects.create(owner=self.user, title="Work")
@@ -1277,15 +1279,22 @@ class ChatTests(TestCase):
         self.client.force_login(self.user)
         self.requests = []
         self.gateway_responses = deque()
+        self.gateway_headers = {}
         requests = self.requests
         gateway_responses = self.gateway_responses
+        gateway_headers = self.gateway_headers
 
         class Gateway(BaseHTTPRequestHandler):
             def do_GET(self):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"data":[{"id":"test/alternate"},{"id":"test/free-model"}]}')
+                self.wfile.write(json.dumps({"data": [
+                    {"id": "test/alternate", "capabilities": {
+                        "supportsThinking": True, "thinking": True, "effort_tiers": ["low", "medium"],
+                    }},
+                    {"id": "test/free-model", "capabilities": {"supportsThinking": False, "thinking": False}},
+                ]}).encode())
 
             def do_POST(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -1300,6 +1309,8 @@ class ChatTests(TestCase):
                 self.send_header(
                     "Content-Type", "text/event-stream" if status == 200 else "application/json"
                 )
+                for name, value in gateway_headers.items():
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -1325,6 +1336,11 @@ class ChatTests(TestCase):
             "daily_messages": daily_messages,
             "max_response_characters": max_response_characters,
             "max_active_schedules": 10,
+            "response_reservation_tokens": 2048,
+            "auto_context_window_tokens": 8192,
+            "unknown_context_window_tokens": "",
+            "preserve_first_messages": 1,
+            "preserve_recent_messages": 3,
         })
         self.assertRedirects(result, "/admin/superharry/chatlimits/")
 
@@ -1349,6 +1365,305 @@ class ChatTests(TestCase):
                 "messages": [{"role": "system", "content": guidance()}, {"role": "user", "content": "Hi"}],
             },
         )])
+
+    def test_new_conversation_uses_and_remembers_the_selected_model(self):
+        from superharry.models import Conversation
+
+        response = self.client.post("/chat/send/", {
+            "message": "Use the alternate model",
+            "model": "test/alternate",
+        })
+        list(response.streaming_content)
+
+        conversation = Conversation.objects.get(owner=self.user)
+        self.assertEqual(conversation.preferred_model, "test/alternate")
+        self.assertEqual(self.requests[0][2]["model"], "test/alternate")
+        reopened = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(reopened, "test/alternate")
+        follow_up = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue"})
+        list(follow_up.streaming_content)
+        self.assertEqual(self.requests[-1][2]["model"], "test/alternate")
+
+    def test_free_selection_uses_the_configured_free_route_after_admin_changes_default(self):
+        from superharry.models import ChatRoute
+
+        ChatRoute.select("test/alternate")
+        response = self.client.post("/chat/send/", {"message": "Use Free", "model": "free"})
+        list(response.streaming_content)
+        self.assertEqual(self.requests[-1][2]["model"], "test/free-model")
+
+    def test_auto_uses_the_configured_free_first_fallback_route(self):
+        with self.settings(AUTO_CHAT_MODEL="superharry-auto"), patch(
+            "superharry.chat.available_route_catalog",
+            return_value={name: {"id": name} for name in ("test/free-model", "test/alternate", "superharry-auto")},
+        ):
+            response = self.client.post("/chat/send/", {"message": "Use Auto", "model": "auto"})
+            list(response.streaming_content)
+        self.assertEqual(self.requests[-1][2]["model"], "superharry-auto")
+
+    def test_auto_records_the_effective_model_reported_by_omniroute(self):
+        from superharry.models import ChatRoute, ConversationEvent
+
+        ChatRoute.select("superharry-auto")
+        with self.settings(AUTO_CHAT_MODEL="superharry-auto"), patch(
+            "superharry.chat.available_route_catalog",
+            return_value={name: {"id": name} for name in ("test/free-model", "test/alternate", "superharry-auto")},
+        ):
+            self.gateway_headers["X-OmniRoute-Model"] = "test/alternate"
+            response = self.client.post("/chat/send/", {"message": "Identify the routed model", "model": "auto"})
+            list(response.streaming_content)
+        self.assertTrue(ConversationEvent.objects.filter(content="Auto used test/alternate").exists())
+
+    def test_auto_reports_an_unknown_effective_model_without_gateway_metadata(self):
+        from superharry.models import ChatRoute, ConversationEvent
+
+        ChatRoute.select("superharry-auto")
+        with self.settings(AUTO_CHAT_MODEL="superharry-auto"), patch(
+            "superharry.chat.available_route_catalog",
+            return_value={name: {"id": name} for name in ("test/free-model", "test/alternate", "superharry-auto")},
+        ):
+            response = self.client.post("/chat/send/", {"message": "Use Auto without metadata", "model": "auto"})
+            list(response.streaming_content)
+        self.assertTrue(ConversationEvent.objects.filter(content="Auto model is unknown").exists())
+
+    def test_verified_reasoning_effort_is_persisted_and_sent_to_the_selected_route(self):
+        from superharry.models import Conversation
+
+        response = self.client.post("/chat/send/", {
+            "message": "Use supported reasoning", "model": "test/alternate", "reasoning_effort": "medium",
+        })
+        list(response.streaming_content)
+        conversation = Conversation.objects.get(owner=self.user)
+        self.assertEqual(conversation.reasoning_effort, "medium")
+        self.assertEqual(self.requests[-1][2]["model"], "test/alternate")
+        self.assertEqual(self.requests[-1][2]["reasoning_effort"], "medium")
+
+    def test_unsupported_reasoning_effort_is_rejected(self):
+        response = self.client.post("/chat/send/", {
+            "message": "Use unsupported reasoning", "model": "test/free-model", "reasoning_effort": "high",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertJSONEqual(response.content, {"error": "This model does not support that reasoning level."})
+
+    def test_existing_conversation_reasoning_preference_is_owned_and_persisted(self):
+        from superharry.models import Conversation
+
+        conversation = Conversation.objects.create(
+            owner=self.user, title="Reasoning preference", preferred_model="test/alternate",
+        )
+        saved = self.client.post(f"/chat/{conversation.pk}/reasoning/", {"reasoning_effort": "medium"})
+        self.assertEqual(saved.status_code, 204)
+        other = Client()
+        other.force_login(get_user_model().objects.create_user(username="reasoning-other"))
+        self.assertEqual(other.post(f"/chat/{conversation.pk}/reasoning/", {"reasoning_effort": "none"}).status_code, 404)
+        reply = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue with reasoning"})
+        list(reply.streaming_content)
+        self.assertEqual(self.requests[-1][2]["reasoning_effort"], "medium")
+
+    def test_auto_records_reasoning_disabled_when_fallback_capability_is_false(self):
+        from superharry.models import ChatRoute, ConversationEvent
+
+        ChatRoute.select("superharry-auto")
+        self.gateway_headers["X-OmniRoute-Model"] = "test/free-model"
+        with self.settings(AUTO_CHAT_MODEL="superharry-auto"), patch(
+            "superharry.chat.available_route_catalog",
+            return_value={
+                "superharry-auto": {"id": "superharry-auto", "capabilities": {
+                    "supportsThinking": True, "thinking": True, "effort_tiers": ["medium"],
+                }},
+                "test/free-model": {"id": "test/free-model", "capabilities": {
+                    "supportsThinking": False, "thinking": False,
+                }},
+            },
+        ):
+            response = self.client.post("/chat/send/", {
+                "message": "Auto with reasoning", "model": "auto", "reasoning_effort": "medium",
+            })
+            list(response.streaming_content)
+        self.assertTrue(ConversationEvent.objects.filter(
+            content="Auto used test/free-model; reasoning turned off for this fallback",
+        ).exists())
+        self.assertEqual(self.requests[-1][2]["reasoning_effort"], "medium")
+
+    def test_manual_compaction_persists_summary_without_deleting_history_or_spending_quota(self):
+        from superharry.models import ChatLimits, ChatSubmission, Conversation, Message
+
+        limits = ChatLimits.objects.get(pk=1)
+        limits.daily_messages = 2
+        limits.save()
+        conversation = Conversation.objects.create(owner=self.user, title="Compact this conversation")
+        messages = []
+        for role, content in (
+            ("user", "The first request"), ("assistant", "The first answer"),
+            ("user", "Older context that should be summarized"), ("assistant", "Older answer to summarize"),
+            ("user", "Middle recent request"), ("assistant", "Middle recent answer"),
+            ("user", "The recent request"), ("assistant", "The recent answer"),
+        ):
+            messages.append(Message.objects.create(
+                conversation=conversation, role=role, content=content, complete=True,
+                prompt=messages[-1] if role == "assistant" else None,
+            ))
+        before = ChatSubmission.objects.filter(owner=self.user).count()
+
+        response = self.client.post(f"/chat/{conversation.pk}/compact/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["compacted"])
+        self.assertEqual(conversation.messages.count(), len(messages))
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Older context that should be summarized")
+        follow_up = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue"})
+        list(follow_up.streaming_content)
+        summarized_context = json.dumps(self.requests[-1][2]["messages"])
+        self.assertIn("Summary of earlier conversation messages", summarized_context)
+        self.assertNotIn("Older context that should be summarized", summarized_context)
+        messages[2].content = "Edited context invalidates the previous summary"
+        messages[2].save(update_fields=("content",))
+        messages[3].delete()
+        next_follow_up = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue again"})
+        list(next_follow_up.streaming_content)
+        outbound = json.dumps(self.requests[-1][2]["messages"])
+        self.assertNotIn("Summary of earlier conversation messages", outbound)
+        self.assertIn("Edited context invalidates the previous summary", outbound)
+        self.assertEqual(ChatSubmission.objects.filter(owner=self.user).count(), before + 2)
+
+    def test_manual_compaction_reports_noop_when_no_older_messages_can_be_removed(self):
+        from superharry.models import Conversation, Message
+
+        conversation = Conversation.objects.create(owner=self.user, title="Short conversation")
+        Message.objects.create(conversation=conversation, role="user", content="First", complete=True)
+        Message.objects.create(conversation=conversation, role="assistant", content="Answer", complete=True)
+        response = self.client.post(f"/chat/{conversation.pk}/compact/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["compacted"])
+        self.assertIn("enough older messages", response.json()["message"])
+
+    def test_repeated_compaction_extends_the_persisted_summary_as_history_grows(self):
+        from unittest.mock import patch
+        from superharry.compaction import compact_conversation
+        from superharry.models import Conversation, ConversationSummary, Message
+
+        conversation = Conversation.objects.create(owner=self.user, title="Growing summary")
+        turns = []
+        for index in range(1, 5):
+            prompt = Message.objects.create(
+                conversation=conversation, role="user", content=f"Turn {index} question", complete=True,
+            )
+            reply = Message.objects.create(
+                conversation=conversation, role="assistant", content=f"Turn {index} answer",
+                prompt=prompt, complete=True,
+            )
+            turns.append((prompt, reply))
+
+        with patch("superharry.compaction._summarize", side_effect=["first pass", "first summary"]):
+            self.assertTrue(compact_conversation(conversation, "test/alternate"))
+        first = ConversationSummary.objects.get(conversation=conversation)
+        initially_covered = set(first.covered_message_ids)
+        self.assertIn(turns[1][0].pk, initially_covered)
+
+        prompt = Message.objects.create(
+            conversation=conversation, role="user", content="Turn 5 question", complete=True,
+        )
+        Message.objects.create(
+            conversation=conversation, role="assistant", content="Turn 5 answer", prompt=prompt, complete=True,
+        )
+        with patch("superharry.compaction._summarize", side_effect=["extended pass", "extended summary"]) as summarize:
+            self.assertTrue(compact_conversation(conversation, "test/alternate"))
+
+        updated = ConversationSummary.objects.get(conversation=conversation)
+        self.assertIn("Existing summary:\nfirst summary", summarize.call_args_list[0].args[1])
+        self.assertTrue(initially_covered.issubset(set(updated.covered_message_ids)))
+        self.assertIn(turns[2][0].pk, updated.covered_message_ids)
+        self.assertEqual(updated.content, "extended summary")
+
+    def test_manual_compaction_requires_conversation_ownership(self):
+        from superharry.models import Conversation
+
+        other = get_user_model().objects.create_user(username="compact-owner")
+        conversation = Conversation.objects.create(owner=other, title="Private compaction")
+        response = self.client.post(f"/chat/{conversation.pk}/compact/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_unknown_model_context_capacity_is_labeled_unknown(self):
+        from superharry.models import Conversation
+
+        conversation = Conversation.objects.create(
+            owner=self.user, title="Unknown context", preferred_model="test/free-model",
+        )
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, "Context unknown")
+
+    def test_automatic_compaction_reports_failure_when_no_messages_can_be_summarized(self):
+        from superharry.models import ChatLimits, ChatSubmission, Conversation, Message
+
+        limits = ChatLimits.objects.get(pk=1)
+        limits.auto_context_window_tokens = 1
+        limits.response_reservation_tokens = 1
+        limits.save()
+        conversation = Conversation.objects.create(owner=self.user, title="Short context")
+        first = Message.objects.create(conversation=conversation, role="user", content="First")
+        Message.objects.create(conversation=conversation, role="assistant", content="Answer", prompt=first)
+
+        response = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue"})
+        events = [json.loads(chunk) for chunk in response.streaming_content]
+
+        self.assertEqual(events[-1], {"error": "This request exceeds the context limit and there are no older messages to compact."})
+        self.assertEqual(self.requests, [])
+        self.assertIsNone(ChatSubmission.objects.get(owner=self.user).submitted_day)
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "First")
+
+    def test_auto_compaction_summarizes_older_turns_before_context_overflow(self):
+        from superharry.models import ChatLimits, Conversation, ConversationEvent, ConversationSummary, Message
+
+        limits = ChatLimits.objects.get(pk=1)
+        limits.auto_context_window_tokens = 8192
+        limits.response_reservation_tokens = 256
+        limits.save()
+        conversation = Conversation.objects.create(owner=self.user, title="Long conversation")
+        first = Message.objects.create(conversation=conversation, role="user", content="Keep this first request")
+        Message.objects.create(conversation=conversation, role="assistant", content="First answer", prompt=first)
+        older = Message.objects.create(conversation=conversation, role="user", content="Older detail " * 5000)
+        Message.objects.create(conversation=conversation, role="assistant", content="Old response " * 5000, prompt=older)
+        recent = Message.objects.create(conversation=conversation, role="user", content="Recent question")
+        Message.objects.create(conversation=conversation, role="assistant", content="Recent answer", prompt=recent)
+
+        response = self.client.post(f"/chat/{conversation.pk}/send/", {"message": "Continue the conversation"})
+        events = [json.loads(chunk) for chunk in response.streaming_content]
+
+        self.assertIn({"model_event": "Conversation context compacted automatically."}, events)
+        self.assertTrue(ConversationSummary.objects.filter(conversation=conversation).exists())
+        self.assertTrue(ConversationEvent.objects.filter(
+            conversation=conversation, content="Conversation context compacted automatically.",
+        ).exists())
+        outbound = json.dumps(self.requests[-1][2]["messages"])
+        self.assertIn("Keep this first request", outbound)
+        self.assertIn("Summary of earlier conversation messages", outbound)
+        self.assertNotIn("Older detail", outbound)
+        self.assertIn("Recent question", outbound)
+
+    def test_existing_conversation_requires_confirmation_and_records_model_change(self):
+        from superharry.models import Conversation
+
+        conversation = Conversation.objects.create(owner=self.user, title="Model choice")
+        denied = self.client.post(f"/chat/{conversation.pk}/model/", {"model": "test/alternate"})
+        self.assertEqual(denied.status_code, 400)
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.preferred_model, "auto")
+
+        changed = self.client.post(f"/chat/{conversation.pk}/model/", {
+            "model": "test/alternate", "confirmed": "1",
+        })
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json(), {"efforts": ["low", "medium"], "reasoning_effort": "none"})
+        self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Model changed to test/alternate")
+
+    def test_free_selection_fails_clearly_when_the_configured_free_route_is_missing(self):
+        from superharry.models import Conversation
+
+        with patch("superharry.chat.available_route_catalog", return_value={"test/alternate": {"id": "test/alternate"}}):
+            response = self.client.post("/chat/send/", {"message": "Use Free", "model": "free"})
+        self.assertEqual(response.status_code, 503)
+        self.assertJSONEqual(response.content, {"error": "The Free model is unavailable."})
+        self.assertFalse(Conversation.objects.filter(owner=self.user).exists())
 
     def test_reopened_chat_shows_history_and_sends_it_with_the_next_message(self):
         first = self.client.post("/chat/send/", {"message": "First question"})
@@ -1384,7 +1699,18 @@ class ChatTests(TestCase):
             other.post(f"/chat/{conversation_id}/send/", {"message": "Intrusion"}).status_code,
             404,
         )
+        self.assertEqual(other.post(f"/chat/{conversation_id}/model/", {
+            "model": "test/alternate", "confirmed": "1",
+        }).status_code, 404)
         self.assertEqual(len(self.requests), 1)
+
+    def test_removed_conversation_model_is_shown_as_disabled(self):
+        from superharry.models import Conversation
+
+        conversation = Conversation.objects.create(owner=self.user, title="Unavailable model", preferred_model="test/removed")
+        page = self.client.get(f"/chat/{conversation.pk}/")
+        self.assertContains(page, 'value="test/removed" data-efforts="" selected disabled')
+        self.assertContains(page, "test/removed (unavailable)")
 
     def test_chat_requires_sign_in(self):
         anonymous = Client()

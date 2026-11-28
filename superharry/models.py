@@ -18,8 +18,24 @@ class Conversation(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=100)
     memory_enabled = models.BooleanField(default=False)
+    preferred_model = models.CharField(max_length=255, default="auto")
+    reasoning_effort = models.CharField(max_length=16, default="none")
     last_opened_at = models.DateTimeField(null=True, blank=True)
     seen_through = models.DateTimeField(null=True, blank=True)
+
+
+class ConversationEvent(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="events")
+    content = models.CharField(max_length=255)
+    created_at = models.DateTimeField(default=timezone.now)
+
+
+class ConversationSummary(models.Model):
+    conversation = models.OneToOneField(Conversation, on_delete=models.CASCADE, related_name="summary")
+    content = models.TextField()
+    covered_message_ids = models.JSONField(default=list)
+    fingerprint = models.CharField(max_length=64)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class ChatRoute(models.Model):
@@ -29,6 +45,7 @@ class ChatRoute(models.Model):
     def active_id(cls):
         return (
             cls.objects.filter(pk=1).values_list("route_id", flat=True).first()
+            or settings.AUTO_CHAT_MODEL
             or settings.CHAT_MODEL
         )
 
@@ -43,6 +60,11 @@ class ChatLimits(models.Model):
     max_response_characters = models.PositiveIntegerField(
         default=12000, validators=[MinValueValidator(1)]
     )
+    response_reservation_tokens = models.PositiveIntegerField(default=2048, validators=[MinValueValidator(1)])
+    auto_context_window_tokens = models.PositiveIntegerField(default=8192, validators=[MinValueValidator(1)])
+    unknown_context_window_tokens = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+    preserve_first_messages = models.PositiveSmallIntegerField(default=1)
+    preserve_recent_messages = models.PositiveSmallIntegerField(default=3)
 
     class Meta:
         verbose_name_plural = "chat limits"

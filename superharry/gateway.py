@@ -42,11 +42,15 @@ def gateway_json(path, key, *, method="GET", payload=None):
 
 
 def available_routes():
+    return sorted(available_route_catalog())
+
+
+def available_route_catalog():
     payload = gateway_json("/v1/models", settings.OMNIROUTE_API_KEY)
-    return sorted({
-        item["id"] for item in gateway_rows(payload, "data")
+    return {
+        item["id"]: item for item in gateway_rows(payload, "data")
         if isinstance(item.get("id"), str) and item["id"]
-    })
+    }
 
 
 def gateway_rows(payload, field):
@@ -95,7 +99,7 @@ def _response_lines(response, deadline):
         yield line
 
 
-def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=None, gateway_url=None,
+def stream_reply(messages, *, route_id, max_tokens=None, reasoning_effort="none", on_submit=None, tools=None, gateway_url=None,
                  gateway_api_key=None, total_timeout=None):
     if total_timeout is not None and (
         isinstance(total_timeout, bool) or not isinstance(total_timeout, (int, float))
@@ -107,6 +111,8 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
         payload["tools"] = tools
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if reasoning_effort != "none":
+        payload["reasoning_effort"] = reasoning_effort
     gateway_url = settings.OMNIROUTE_URL if gateway_url is None else gateway_url
     gateway_api_key = settings.OMNIROUTE_API_KEY if gateway_api_key is None else gateway_api_key
     request = Request(
@@ -133,6 +139,7 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
     except (URLError, TimeoutError):
         raise GatewayFailure("The free route is currently unavailable.") from None
     calls = {}
+    finished = False
     deadline_timer = None
     if deadline is not None:
         remaining = deadline - time.monotonic()
@@ -152,6 +159,9 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
         deadline_timer.start()
     with response:
         try:
+            if route_id in {"superharry-auto", getattr(settings, "AUTO_CHAT_MODEL", "")}:
+                reported_model = response.headers.get("X-OmniRoute-Model", "").strip()
+                yield {"effective_model": reported_model[:200] or None}
             for line in _response_lines(response, deadline):
                 if not line.startswith(b"data:"):
                     continue
@@ -171,10 +181,15 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
                     break
                 choices = event.get("choices")
                 if choices:
+                    if choices[0].get("finish_reason") is not None:
+                        finished = True
                     delta = choices[0].get("delta", {})
                     content = delta.get("content")
                     if isinstance(content, str) and content:
                         yield content
+                    reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+                    if isinstance(reasoning, str) and reasoning:
+                        yield {"reasoning": reasoning}
                     for part in delta.get("tool_calls", []):
                         index = part.get("index")
                         if not isinstance(index, int) or not 0 <= index < 10:
@@ -195,6 +210,10 @@ def stream_reply(messages, *, route_id, max_tokens=None, on_submit=None, tools=N
         finally:
             if deadline_timer is not None:
                 deadline_timer.cancel()
+    if finished:
+        for call in calls.values():
+            yield {"tool_call": call}
+        return
     raise OSError("The gateway stream ended before completion.")
 
 
