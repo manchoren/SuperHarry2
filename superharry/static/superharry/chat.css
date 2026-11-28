@@ -123,6 +123,7 @@ pre { overflow-x: auto; }
 #composer { gap: .6rem; }
 #composer textarea { border: 0; padding: .45rem; min-height: 5rem; background: transparent; }
 .composer-options { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.composer-options svg.sh-icon { fill: none; stroke: currentColor; stroke-width: 1.7; }
 .composer-options summary { display: flex; align-items: center; gap: .4rem; min-height: 2.75rem; padding: .3rem .65rem; border-radius: .6rem; cursor: pointer; list-style: none; }
 .composer-options summary:hover { background: var(--accent-soft); }
 .composer-options summary::-webkit-details-marker { display: none; }
@@ -130,6 +131,28 @@ pre { overflow-x: auto; }
 .composer-panel { position: absolute; bottom: 100%; left: 0; z-index: 4; width: min(25rem, 70vw); padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); box-shadow: var(--shadow); }
 .composer-panel label, .composer-panel small { display: block; }
 .composer-model { margin-left: auto; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.composer-active-model { display: flex; justify-content: flex-end; align-items: baseline; gap: .45rem; min-width: 0; color: var(--muted); font-size: .8rem; }
+.composer-active-model-label { flex: none; }
+.composer-active-model-name { min-width: 0; max-width: min(55%, 24rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-controls { margin-inline-start: 0; }
+.model-controls > summary { justify-content: flex-start; gap: .4rem; }
+.model-controls > summary span:last-child { max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-controls-panel { display: grid; gap: .85rem; width: min(22rem, calc(100vw - 5rem)); }
+.model-controls-panel .sh-model { display: grid; gap: .35rem; }
+.model-controls-panel .sh-model[hidden] { display: none; }
+.model-controls-panel select { width: 100%; }
+.model-controls-panel .reasoning-control { grid-template-columns: auto minmax(4.5rem, 1fr) auto; align-items: center; }
+.composer-options .model-controls-panel svg.sh-icon { width: 1.25rem; height: 1.25rem; }
+.memory-toggle-wrap { display: flex; align-items: center; }
+.memory-toggle { position: relative; display: inline-grid !important; width: 2.75rem; height: 2.75rem; place-items: center; border-radius: .6rem; color: var(--muted); cursor: pointer; }
+.memory-toggle:hover, .memory-toggle:focus-within { color: var(--text); background: var(--accent-soft); }
+.memory-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.memory-toggle input:focus-visible + svg { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: .2rem; }
+.memory-toggle input:checked + svg { color: var(--accent); }
+.memory-toggle-tooltip { position: absolute; z-index: 9; left: 50%; bottom: calc(100% + .35rem); width: max-content; max-width: min(18rem, calc(100vw - 5rem)); padding: .4rem .55rem; border: 1px solid var(--line); border-radius: .45rem; color: var(--text); background: var(--surface); box-shadow: var(--shadow); font-size: .75rem; font-weight: 400; opacity: 0; pointer-events: none; transform: translate(-50%, .2rem); transition: opacity .12s ease, transform .12s ease; }
+.memory-toggle:hover .memory-toggle-tooltip, .memory-toggle:focus-within .memory-toggle-tooltip { opacity: 1; transform: translate(-50%, 0); }
+.conversation-memory-state { margin: 0; justify-content: flex-start; color: var(--muted); font-size: .875rem; }
+.rail-button svg.sh-icon { stroke-width: 1.4; }
 .reasoning-control { display: flex; align-items: center; gap: .35rem; }
 .reasoning-control input { width: 4.5rem; accent-color: var(--accent); }
 .context-doughnut { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .75rem; }
@@ -181,6 +204,8 @@ pre { overflow-x: auto; }
 .chat-page #composer .sh-send { margin-inline-start: auto; }
 .chat-page #composer .composer-model { margin-inline-start: 0; }
 .chat-page #composer .composer-model[aria-label="Active model"] { margin-inline-end: auto; }
+.chat-page #composer > .composer-active-model { justify-self: stretch; }
+.chat-page #composer .composer-options .model-controls { margin-inline-start: 0; }
 .chat-page .composer-options .sh-disclosure > summary { border: 0; }
 .chat-page .composer-options .sh-disclosure > summary:is(:hover, :focus-visible) { background: var(--sh-selected); }
 .chat-page #chat-status:empty { display: none; }

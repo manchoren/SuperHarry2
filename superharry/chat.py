@@ -417,6 +417,7 @@ def page(request, conversation_id=None):
         "active_model": ChatRoute.active_id(),
         "model_options": model_options,
         "model_selection": model_selection,
+        "model_selection_label": selected_option.get("label", model_selection),
         "reasoning_options": reasoning_options,
         "reasoning_effort": conversation.reasoning_effort if conversation and conversation.reasoning_effort in reasoning_options else "none",
         "context_limit": context_limit,
@@ -1285,7 +1286,7 @@ def send(request, conversation_id=None):
             except UnicodeDecodeError:
                 pass
         attachment_data.append((attachment.name[:255], payload, media))
-    memory_enabled = conversation is None and request.POST.get("memory_enabled") == "on"
+    memory_enabled = conversation is None and request.POST.get("memory_enabled", "on") == "on"
     def create_reply():
         target = conversation or conversations.create(
             owner=request.user, title=text[:100], memory_enabled=memory_enabled,

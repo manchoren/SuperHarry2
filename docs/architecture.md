@@ -24,7 +24,7 @@ Django admin lists available routes, adds or updates model entries on existing p
 
 ## Memory and skills
 
-Sending a chat message authorizes the selected provider to receive that message and the conversation context needed for the reply. Users explicitly save durable memories and can inspect, edit, or delete them. Before the first message in a conversation, users may opt in to including relevant saved memories in hosted requests; the choice is stored with that conversation and defaults to off. After creation, chat shows the stored state as a read-only indicator. Start with bounded retrieval from SQLite.
+Sending a chat message authorizes the selected provider to receive that message and the conversation context needed for the reply. Users explicitly save durable memories and can inspect, edit, or delete them. For a new conversation, relevant saved memories are included in hosted requests by default; users can turn this off before the first message. Store the choice with that conversation. Preserve the saved choice of existing conversations and show it as a read-only indicator after creation. Start with bounded retrieval from SQLite.
 
 Discover repository-managed skills and locally stored skill drafts dynamically. The current interface calls the latter “VM skills”; this denotes their application-managed origin, not a requirement to start a separate VM. Repository definitions are read-only in the application; local skills are managed by their owners or administrators and shared for use after preparation. Reject conflicting names. The agent-driven selection and lifecycle are tracked separately from the initial skill runtime.
 

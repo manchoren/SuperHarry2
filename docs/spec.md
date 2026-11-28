@@ -23,7 +23,7 @@ Deliver chat and administration first, then saved memory, then dynamically disco
 11. As a regular user, I want locally rejected requests to be free and repeat delivery of one submission to count once so my quota reflects submissions to the gateway.
 12. As the owner, I want provisioning reruns to preserve persistent state and administrator choices so I can repair an installation safely.
 13. As a regular user, I want to save, view, edit, and delete memories so I control what persists beyond chat history.
-14. As a regular user, I want a memory toggle near the composer that defaults to off per conversation so I control when relevant saved memories enter hosted requests.
+14. As a regular user, I want a memory toggle in the model controls that defaults to on for each new conversation so I can control whether relevant saved memories enter hosted requests.
 15. As a regular user, I want the agent to select an appropriate available skill through chat so I can use its workflow from the normal interface.
 16. As a regular user, I want to request a summary of a specific CSV I own and read the result so I control which file is processed.
 17. As a regular user, I want server-side ownership checks on my conversations, memories, files, and results so other users cannot access them.
@@ -36,7 +36,7 @@ Deliver chat and administration first, then saved memory, then dynamically disco
 - Allow one active response per user. Enforce daily message and maximum response length limits, with per-user overrides. Reset the daily counter at midnight in the deployment timezone, initially `America/Guayaquil`. Count each submission to OmniRoute once. Persist partial replies and mark interrupted turns incomplete.
 - Stream through OmniRoute's OpenAI-compatible chat endpoint. Seed the OpenRouter `google/gemma-4-26b-a4b-it:free` route and verify its canonical ID from the deployed gateway. Provision available OpenRouter, Groq, and Gemini connections from installer secrets. Disable paid fallback. Manage provider accounts, upstream credentials, and OAuth in OmniRoute. Give Django separate server-side inference and management credentials with the smallest supported management scope.
 - Provision the gateway on a private network, migrate Django, and bootstrap the recovery account. Repair missing configuration on reruns and preserve administrator choices. A live provider outage must allow Django and OmniRoute to start.
-- Store chat history and saved memory in separate models. Sending a message authorizes sending the conversation context needed for the reply. Use bounded SQLite retrieval for relevant memories from the conversation owner only when that conversation opts in.
+- Store chat history and saved memory in separate models. Sending a message authorizes sending the conversation context needed for the reply. Use bounded SQLite retrieval for relevant memories from the conversation owner when that conversation has memory enabled. New conversations default to enabled; users may turn it off before the first message, and existing conversation settings remain unchanged.
 - Discover repository and locally stored skills dynamically, and enforce ownership when managing local skill drafts. The current interface calls application-managed local skills “VM skills”; they do not require a separate VM. Run each job in a disposable environment without application credentials or the Docker socket. Bound CPU, memory, runtime, and output and clean up job state. Deny direct sandbox network access; mediate Internet requests and require specific approval for transmitting user data, external effects, and uncertain requests. Prepare dependencies using supplied wheels or mediated downloads. A user must explicitly request a CSV summary and own the file.
 
 ## Testing Decisions
@@ -57,3 +57,4 @@ Track implementation and runtime verification separately in the milestones and i
 - [Architecture and agreed decisions](architecture.md)
 - [Milestones and acceptance criteria](milestones.md)
 - [Docker and deployment runbook](vm-runbook.md)
+- [Input downloads and conversation attachments](input-attachments-spec.md)

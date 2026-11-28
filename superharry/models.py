@@ -17,7 +17,7 @@ class UserProfile(models.Model):
 class Conversation(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=100)
-    memory_enabled = models.BooleanField(default=False)
+    memory_enabled = models.BooleanField(default=True)
     preferred_model = models.CharField(max_length=255, default="auto")
     reasoning_effort = models.CharField(max_length=16, default="none")
     last_opened_at = models.DateTimeField(null=True, blank=True)

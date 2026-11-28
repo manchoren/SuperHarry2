@@ -49,6 +49,24 @@ Refresh the user-facing interface with a coherent identity, shared navigation, r
 
 Use Docker Desktop for applicable runtime validation. The visual reference informs the design; SuperHarry keeps its own identity.
 
+## Approved follow-up: composer and table polish (2026-11-28)
+
+The following decisions refine the chat composer and shared data tables. They are tracked in [issue #90](https://github.com/manchoren/SuperHarry2/issues/90) and supersede the earlier unchecked-memory default in this document and in the original UI refresh acceptance; they do not change memory ownership or retrieval boundaries.
+
+- Put model selection, supported reasoning controls, and the per-conversation memory toggle in one keyboard-operable Model disclosure. Show reasoning only while the disclosure is open and only when the selected model supports it.
+- Show the active model at the composer's upper right. Keep its full accessible name and truncate the visible text with an ellipsis when space is limited. Align the Model label and selected value as one control.
+- Replace the visible memory sentence with the shared brain icon. Keep an accessible name and a visible tooltip on hover or keyboard focus, and expose whether memory is on or off. New conversations start with memory enabled; the user can turn it off before the first message. Existing conversations keep their stored value and continue to show it read-only after creation.
+- Use the existing outline icon artwork in the navigation rail without a heavy visual weight.
+- Across user-facing tables with an Actions column, let data columns use available width and keep Actions only as wide as its controls require. Preserve responsive behavior. Show this shared table behavior in the development catalog.
+- Add vertical space between the Inputs upload form and its table.
+- Leave Django Admin outside this visual scope.
+
+### Validation seam
+
+- Django chat tests use an isolated database and controlled gateway to verify that new conversations default to memory enabled, can opt out before their first message, preserve existing settings, and send only the owning user's eligible memories when enabled.
+- The existing Playwright UI browser smoke is extended to verify the Model disclosure, accessible brain toggle and status, model ellipsis, supported reasoning visibility, shared table action sizing, and Inputs upload spacing at desktop and narrow widths. Use synthetic data and the controlled gateway; do not use the deployed service or live model provider for these checks.
+- Review browser screenshots for the composer, navigation rail, memory and Inputs views, and representative tables in light and dark themes. Preserve keyboard access, visible focus, tooltip access, and narrow-screen behavior.
+
 ## Validation evidence
 
 - On 2026-11-25, against the uncommitted changes based on `89ba9ec`, 147 existing chat, memory, scheduling, CSV, and skills Django tests passed locally and in a network-isolated Docker container with the checkout mounted read-only and synthetic credentials.

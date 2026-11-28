@@ -5,6 +5,7 @@ const historyLink = document.querySelector("#chat-history");
 const messages = document.querySelector("#messages");
 const selectedSkill = document.querySelector("#selected-skill");
 const conversationModel = document.querySelector("#conversation-model");
+const selectedModelLabel = document.querySelector("#selected-model-label");
 const reasoningControl = document.querySelector("#reasoning-effort");
 const reasoningLabel = document.querySelector("#reasoning-label");
 const compactContext = document.querySelector("#compact-context");
@@ -75,11 +76,13 @@ conversationModel?.addEventListener("change", async () => {
   const previousOption = Array.from(conversationModel.options).find((option) => option.value === previous);
   if (!conversationModel.dataset.endpoint) {
     conversationModel.dataset.selection = conversationModel.value;
+    if (selectedModelLabel) selectedModelLabel.textContent = conversationModel.selectedOptions[0]?.textContent.trim() || "Model";
     applyReasoningOptions(conversationModel.selectedOptions[0]);
     return;
   }
   if (!window.confirm("Changing the model can affect conversation coherence. Change it?")) {
     conversationModel.value = previous;
+    if (selectedModelLabel) selectedModelLabel.textContent = previousOption?.textContent.trim() || "Model";
     applyReasoningOptions(previousOption);
     return;
   }
@@ -93,12 +96,14 @@ conversationModel?.addEventListener("change", async () => {
   const response = await fetch(conversationModel.dataset.endpoint, {method: "POST", body: form});
   if (!response.ok) {
     conversationModel.value = previous;
+    if (selectedModelLabel) selectedModelLabel.textContent = previousOption?.textContent.trim() || "Model";
     applyReasoningOptions(previousOption, previousEffort);
     if (statusMessage) statusMessage.textContent = (await response.json()).error || "The model could not be changed.";
     return;
   }
   const result = await response.json().catch(() => ({}));
   conversationModel.dataset.selection = conversationModel.value;
+  if (selectedModelLabel) selectedModelLabel.textContent = conversationModel.selectedOptions[0]?.textContent.trim() || "Model";
   if (reasoningControl) {
     const selected = conversationModel.selectedOptions[0];
     selected.dataset.efforts = (result.efforts || []).join(",");

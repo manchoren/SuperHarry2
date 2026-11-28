@@ -27,7 +27,22 @@ class Gateway(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({"data": [{"id": "test/free-model"}]}).encode())
+        self.wfile.write(
+            json.dumps(
+                {
+                    "data": [
+                        {"id": "test/free-model"},
+                        {
+                            "id": "test/reasoning-model",
+                            "capabilities": {
+                                "supportsThinking": True,
+                                "effort_tiers": ["low", "medium"],
+                            },
+                        },
+                    ]
+                }
+            ).encode()
+        )
 
     def do_POST(self):
         self.rfile.read(int(self.headers["Content-Length"]))
@@ -69,7 +84,9 @@ from superharry.models import Conversation, Message, Schedule
 from django.utils import timezone
 from datetime import timedelta
 
-conversation = Conversation.objects.create(owner=user, title="Synthetic conversation")
+conversation = Conversation.objects.create(
+    owner=user, title="Synthetic conversation", memory_enabled=False
+)
 prompt = Message.objects.create(
     conversation=conversation, role="user", content="Synthetic prompt"
 )
@@ -106,9 +123,38 @@ from playwright.sync_api import sync_playwright
 
 def choose_theme(page, mode):
     slider = page.locator("[data-theme-select]")
-    if not slider.is_visible():
+    opened_popover = not slider.is_visible()
+    if opened_popover:
         page.locator(".appearance-popover summary").click()
     slider.evaluate("(element, value) => { element.value = value; element.dispatchEvent(new Event('input', {bubbles: true})); }", {"light": "0", "system": "1", "dark": "2"}[mode])
+    page.wait_for_function(
+        "expected => document.documentElement.dataset.theme === (expected === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : expected)",
+        arg=mode,
+    )
+    if opened_popover:
+        page.locator(".appearance-popover[open] summary").click()
+
+
+def assert_table_action_column(table):
+    table_box = table.bounding_box()
+    action_box = table.locator("thead th").last.bounding_box()
+    content_boxes = [
+        table.locator("thead th").nth(index).bounding_box()
+        for index in range(table.locator("thead th").count() - 1)
+    ]
+    assert action_box["width"] < table_box["width"] * 0.5, (
+        table.get_attribute("class"), table_box, action_box
+    )
+    assert max(box["width"] for box in content_boxes) > action_box["width"], (
+        table.get_attribute("class"), content_boxes, action_box
+    )
+
+
+def capture_component_screenshot(page, name):
+    screenshot_dir = os.environ.get("UI_COMPONENT_SCREENSHOT_DIR")
+    if screenshot_dir:
+        Path(screenshot_dir).mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(Path(screenshot_dir) / (name + ".png")), full_page=True)
 
 
 with sync_playwright() as p:
@@ -144,6 +190,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Search conversations (coming later)").click()
     assert page.url == original_url
     page.get_by_role("button", name="Hide conversations").click()
+    page.wait_for_function("document.body.classList.contains('sidebar-closed')")
     assert not page.locator("#site-sidebar").is_visible()
     page.get_by_role("button", name="Toggle conversations").click()
     assert page.locator("#site-sidebar").is_visible()
@@ -156,8 +203,8 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:18765/chat/%s/" % conversation.pk)
     assert page.get_by_text("Incomplete reply").is_visible()
     assert page.get_by_role("button", name="Retry reply").is_visible()
-    assert page.locator('[aria-label="Memory: Off"]').is_visible()
-    assert page.locator('[aria-label="Memory: Off"]').get_attribute("title") == "Memory: Off"
+    assert page.locator('[aria-label="Saved memory is off"]').count() == 1
+    assert page.locator('[aria-label="Saved memory is off"]').get_attribute("title") == "Saved memory is off"
     assert page.get_by_label("Use saved memories in this conversation").count() == 0
     assert page.get_by_role("button", name="Save memory setting").count() == 0
     user_header = page.locator("#messages .message-header").first
@@ -167,6 +214,31 @@ with sync_playwright() as p:
     avatar_box = avatar.bounding_box()
     assert abs((label_box["y"] + label_box["height"] / 2) - (avatar_box["y"] + avatar_box["height"] / 2)) < 2
     composer_options = page.locator("#composer .composer-options")
+    model_disclosure = page.locator("#composer details.model-controls")
+    assert not model_disclosure.evaluate("element => element.open")
+    assert not page.locator("#conversation-model").is_visible()
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
+    assert model_disclosure.evaluate("element => element.open")
+    assert page.locator("#conversation-model").is_visible()
+    assert page.locator("#reasoning-effort").is_hidden()
+    assert page.locator(".conversation-memory-state").is_visible()
+    assert page.locator('[aria-label="Saved memory is off"]').is_visible()
+    page.keyboard.press("Escape")
+    page.goto("http://127.0.0.1:18765/chat/%s/" % conversation.pk)
+    active_model = page.locator(".composer-active-model")
+    model_name = page.locator(".composer-active-model-name")
+    model_name.evaluate("element => { element.textContent = 'test/very-long-provider-model-name-for-ellipsis-acceptance'; element.style.maxWidth = '6rem'; }")
+    assert page.evaluate("getComputedStyle(document.querySelector('.composer-active-model-name')).textOverflow") == "ellipsis"
+    assert page.evaluate("document.querySelector('.composer-active-model-name').scrollWidth > document.querySelector('.composer-active-model-name').clientWidth")
+    assert "test/free-model" in active_model.get_attribute("aria-label")
+    assert "test/free-model" in active_model.get_attribute("title")
+    rail = page.locator(".icon-rail")
+    rail_icon = rail.locator(".rail-button svg.sh-icon").first
+    assert 0 < float(rail_icon.evaluate("element => getComputedStyle(element).strokeWidth.replace('px', '')")) < 2
+    rail_link = rail.get_by_role("link").first
+    rail_link.focus()
+    assert page.evaluate("getComputedStyle(document.activeElement).outlineStyle !== 'none'")
     files_link = page.get_by_role("link", name="Conversation files")
     assert files_link.is_visible()
     assert composer_options.locator("details.composer-popover summary").nth(0).is_visible()
@@ -192,6 +264,28 @@ with sync_playwright() as p:
     page.wait_for_url("**/chat/%s/" % conversation.pk)
     assert page.get_by_text("Browser streamed response").is_visible()
     page.goto("http://127.0.0.1:18765/")
+    model_disclosure = page.locator("#composer details.model-controls")
+    assert not model_disclosure.evaluate("element => element.open")
+    assert not page.locator("#reasoning-effort").is_visible()
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
+    assert model_disclosure.evaluate("element => element.open")
+    model_choice = page.locator("#conversation-model")
+    assert model_choice.is_visible()
+    assert page.locator("#reasoning-effort").is_hidden()
+    model_choice.select_option("test/reasoning-model")
+    assert page.locator("#reasoning-effort").is_visible()
+    model_choice.select_option("auto")
+    assert page.locator("#reasoning-effort").is_hidden()
+    memory_choice = page.get_by_label("Use saved memories in this conversation")
+    assert memory_choice.is_checked()
+    tooltip = page.locator("#memory-toggle-tooltip")
+    memory_choice.focus()
+    assert tooltip.is_visible()
+    assert tooltip.get_attribute("role") == "tooltip"
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
+    assert not model_disclosure.evaluate("element => element.open")
     message_box = page.locator("#message")
     message_box.fill("Please use /summ")
     suggestions = page.get_by_role("listbox", name="Skill suggestions")
@@ -212,15 +306,20 @@ with sync_playwright() as p:
     page.keyboard.press("Escape")
     assert suggestions.is_hidden()
     message_box.fill("")
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
     memory_choice = page.get_by_label("Use saved memories in this conversation")
-    assert not memory_choice.is_checked()
+    assert memory_choice.is_checked()
     memory_choice.focus()
     page.keyboard.press("Space")
-    assert memory_choice.is_checked()
-    page.locator("#message").fill("Opt into saved memories")
+    assert not memory_choice.is_checked()
+    page.locator("#message").fill("Opt out of saved memories")
     page.locator("#composer").get_by_role("button", name="Send").click()
     page.wait_for_url("**/chat/*/")
-    assert page.locator('[aria-label="Memory: On"]').is_visible()
+    model_disclosure = page.locator("#composer details.model-controls")
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
+    assert page.locator('[aria-label="Saved memory is off"]').is_visible()
     assert page.get_by_label("Use saved memories in this conversation").count() == 0
     page.goto("http://127.0.0.1:18765/")
     page.locator("#message").fill("Hello controlled gateway")
@@ -234,9 +333,13 @@ with sync_playwright() as p:
     assert "Receiving" in page.locator("#chat-status").inner_text()
     page.get_by_text("Browser streamed response").wait_for(timeout=10000)
     page.wait_for_url("**/chat/*/")
+    model_disclosure = page.locator("#composer details.model-controls")
+    model_disclosure.locator("summary").focus()
+    page.keyboard.press("Enter")
     assert (
         page.locator("#messages").get_by_text("Hello controlled gateway").is_visible()
     )
+    assert page.locator('[aria-label="Saved memory is on"]').is_visible()
     assert page.get_by_text("Browser streamed response").is_visible()
     if os.environ.get("UI_CHAT_ONLY") == "1":
         chat_violations = {}
@@ -292,12 +395,79 @@ with sync_playwright() as p:
         }
     )
     page.get_by_role("button", name="Upload").click()
-    assert page.get_by_text(long_filename).is_visible()
+    assert page.get_by_text(long_filename[:60], exact=False).is_visible()
+    page.set_viewport_size({"width": 1440, "height": 900})
+    upload_form = page.locator(".input-upload-form")
+    inputs_region = page.get_by_role("region", name="Chat inputs")
+    upload_bottom = upload_form.bounding_box()["y"] + upload_form.bounding_box()["height"]
+    table_top = inputs_region.bounding_box()["y"]
+    assert table_top - upload_bottom >= 16, (upload_bottom, table_top)
+    assert_table_action_column(page.get_by_role("table", name="Uploaded chat inputs"))
+    page.goto("http://127.0.0.1:18765/files/")
+    assert_table_action_column(page.get_by_role("table", name="Uploaded and generated files"))
+    page.goto("http://127.0.0.1:18765/schedules/")
+    assert_table_action_column(page.get_by_role("table", name="Your scheduled tasks"))
+    page.goto("http://127.0.0.1:18765/inputs/")
+    page.set_viewport_size({"width": 390, "height": 844})
+    inputs_region = page.get_by_role("region", name="Chat inputs")
+    assert inputs_region.evaluate("element => element.scrollWidth >= element.clientWidth")
+    upload_bottom = page.locator(".input-upload-form").bounding_box()["y"] + page.locator(".input-upload-form").bounding_box()["height"]
+    table_top = inputs_region.bounding_box()["y"]
+    assert table_top - upload_bottom >= 16, (upload_bottom, table_top)
+    assert_table_action_column(page.get_by_role("table", name="Uploaded chat inputs"))
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1440, "height": 900})
     choose_theme(page, "system")
     assert page.locator("html").get_attribute("data-theme") == "light"
     page.emulate_media(color_scheme="dark")
     page.wait_for_function("document.documentElement.dataset.theme === 'dark'")
     choose_theme(page, "light")
+    for listing_name, listing_path in (
+        ("inputs", "/inputs/"),
+        ("files", "/files/"),
+        ("memories", "/memories/"),
+        ("skills", "/skills/"),
+        ("schedules", "/schedules/"),
+    ):
+        for viewport_name, viewport in (
+            ("desktop", {"width": 1440, "height": 900}),
+            ("narrow", {"width": 390, "height": 844}),
+        ):
+            page.set_viewport_size(viewport)
+            for theme_name in ("light", "dark"):
+                page.goto("http://127.0.0.1:18765" + listing_path)
+                choose_theme(page, theme_name)
+                effective_colors = page.evaluate(
+                    "() => ({theme: document.documentElement.dataset.theme, page: getComputedStyle(document.body).backgroundColor, colorScheme: getComputedStyle(document.body).colorScheme, component: getComputedStyle(document.querySelector('.sh')).getPropertyValue('--sh-bg').trim()})"
+                )
+                assert effective_colors["theme"] == theme_name, (listing_name, effective_colors)
+                assert effective_colors["colorScheme"] == theme_name, (listing_name, effective_colors)
+                expected_background = "rgb(248, 247, 244)" if theme_name == "light" else "rgb(24, 30, 34)"
+                assert effective_colors["page"] == expected_background, (listing_name, effective_colors)
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
+                    listing_name, viewport_name, theme_name
+                )
+                tables = page.locator("table.sh-table-actions")
+                if viewport_name == "desktop":
+                    for index in range(tables.count()):
+                        if tables.nth(index).is_visible():
+                            assert_table_action_column(tables.nth(index))
+                if listing_name in {"inputs", "files"}:
+                    capture_component_screenshot(
+                        page,
+                        f"{listing_name}-{viewport_name}-{theme_name}",
+                    )
+    for viewport_name, viewport in (
+        ("desktop", {"width": 1440, "height": 900}),
+        ("narrow", {"width": 390, "height": 844}),
+    ):
+        for theme_name in ("light", "dark"):
+            page.set_viewport_size(viewport)
+            page.goto("http://127.0.0.1:18765/")
+            choose_theme(page, theme_name)
+            capture_component_screenshot(page, f"composer-{viewport_name}-{theme_name}")
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto("http://127.0.0.1:18765/inputs/")
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto("http://127.0.0.1:18765/")
     assert not page.locator("#site-sidebar").is_visible()
@@ -345,7 +515,7 @@ with sync_playwright() as p:
             choose_theme(page, mode)
             page.add_script_tag(path=axe_script)
             results = page.evaluate(
-                "async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => ({id:v.id, nodes:v.nodes.length, impact:v.impact}))"
+                "async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => ({id:v.id, impact:v.impact, nodes:v.nodes.map(n => ({target:n.target, failureSummary:n.failureSummary}))}))"
             )
             assert not results, ("AXE", path, mode, results)
     page.set_viewport_size({"width": 390, "height": 844})

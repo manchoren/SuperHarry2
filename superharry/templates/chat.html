@@ -86,11 +86,10 @@
 <form id="composer" class="sh-composer" method="post" enctype="multipart/form-data" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
   {% csrf_token %}
   <input type="hidden" name="submission_id" value="{{ submission_id }}">
-  {% if not conversation %}
-    <label class="sh-check"><input type="checkbox" name="memory_enabled"> Use saved memories in this conversation</label>
-  {% else %}
-    <p class="sh-memory-state" aria-label="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}" title="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}">Saved memory for this conversation: <strong>{% if conversation.memory_enabled %}On{% else %}Off{% endif %}</strong></p>
-  {% endif %}
+  <div class="composer-active-model" aria-label="Active model: {{ active_model|default:'Not configured' }}" title="{{ active_model|default:'Not configured' }}">
+    <span class="composer-active-model-label">Model</span>
+    <span class="composer-active-model-name">{{ active_model|default:"Not configured" }}</span>
+  </div>
   <label class="visually-hidden" for="message">Message</label>
   <div class="composer-message">
     <pre id="message-highlights" class="message-highlights" aria-hidden="true"></pre>
@@ -120,16 +119,35 @@
       </div>
     </details>
     <span id="selected-skill-label" class="selected-skill-label sh-muted" aria-live="polite"></span>
-    <span class="composer-model" aria-label="Active model">Model: {{ active_model|default:"Not configured" }}</span>
-    <label class="composer-model sh-model" for="conversation-model">Model
-      <select id="conversation-model" name="model" data-selection="{{ model_selection }}"{% if conversation %} data-endpoint="{% url 'conversation-model' conversation.pk %}"{% endif %}>
-        {% for option in model_options %}<option value="{{ option.id }}" data-efforts="{% for effort in option.efforts %}{{ effort }}{% if not forloop.last %},{% endif %}{% endfor %}"{% if option.id == model_selection %} selected{% endif %}{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
-      </select>
-    </label>
-    <label class="composer-model reasoning-control sh-model" for="reasoning-effort"{% if not reasoning_options %} hidden{% endif %}>Reasoning
-      <input id="reasoning-effort" type="range" name="reasoning_effort" min="0" max="{{ reasoning_options|length }}" step="1" value="{% if reasoning_effort == 'none' %}0{% else %}{% for option in reasoning_options %}{% if option == reasoning_effort %}{{ forloop.counter }}{% endif %}{% endfor %}{% endif %}" data-choices="none{% for option in reasoning_options %},{{ option }}{% endfor %}"{% if conversation %} data-endpoint="{% url 'conversation-reasoning' conversation.pk %}"{% endif %}>
-      <output id="reasoning-label">{% if reasoning_effort == 'none' %}Off{% else %}{{ reasoning_effort|capfirst }}{% endif %}</output>
-    </label>
+    <details class="composer-popover model-controls sh-disclosure">
+      <summary class="sh-button sh-button-quiet"><span>Model</span><span id="selected-model-label">{{ model_selection_label }}</span></summary>
+      <div class="composer-panel sh-popover model-controls-panel">
+        <label class="sh-model" for="conversation-model">Model
+          <select id="conversation-model" name="model" data-selection="{{ model_selection }}"{% if conversation %} data-endpoint="{% url 'conversation-model' conversation.pk %}"{% endif %}>
+            {% for option in model_options %}<option value="{{ option.id }}" data-efforts="{% for effort in option.efforts %}{{ effort }}{% if not forloop.last %},{% endif %}{% endfor %}"{% if option.id == model_selection %} selected{% endif %}{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="reasoning-control sh-model" for="reasoning-effort"{% if not reasoning_options %} hidden{% endif %}>Reasoning
+          <input id="reasoning-effort" type="range" name="reasoning_effort" min="0" max="{{ reasoning_options|length }}" step="1" value="{% if reasoning_effort == 'none' %}0{% else %}{% for option in reasoning_options %}{% if option == reasoning_effort %}{{ forloop.counter }}{% endif %}{% endfor %}{% endif %}" data-choices="none{% for option in reasoning_options %},{{ option }}{% endfor %}"{% if conversation %} data-endpoint="{% url 'conversation-reasoning' conversation.pk %}"{% endif %}>
+          <output id="reasoning-label">{% if reasoning_effort == 'none' %}Off{% else %}{{ reasoning_effort|capfirst }}{% endif %}</output>
+        </label>
+        {% if not conversation %}
+          <div class="memory-toggle-wrap">
+            <input type="hidden" name="memory_enabled" value="off">
+            <label class="memory-toggle" title="Use saved memories in this conversation">
+              <input type="checkbox" name="memory_enabled" value="on" aria-label="Use saved memories in this conversation" aria-describedby="memory-toggle-tooltip" checked>
+              <svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-brain"></use></svg>
+              <span id="memory-toggle-tooltip" class="memory-toggle-tooltip" role="tooltip">Use saved memories in this conversation</span>
+            </label>
+          </div>
+        {% else %}
+          <p class="conversation-memory-state" role="status" aria-label="Saved memory is {% if conversation.memory_enabled %}on{% else %}off{% endif %}" title="Saved memory is {% if conversation.memory_enabled %}on{% else %}off{% endif %}">
+            <svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-brain"></use></svg>
+            Saved memory <strong>{% if conversation.memory_enabled %}On{% else %}Off{% endif %}</strong>
+          </p>
+        {% endif %}
+      </div>
+    </details>
     <button class="sh-button sh-button-primary sh-send" type="submit">Send</button>
   </div>
 </form>

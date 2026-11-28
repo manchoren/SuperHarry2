@@ -92,7 +92,9 @@ class RouteAdminTests(TestCase):
         self.assertRedirects(response, self.admin_url)
         regular = Client()
         regular.force_login(get_user_model().objects.create_user(username="route-chat-user"))
-        self.assertContains(regular.get("/"), "Model: nous/other:free")
+        self.assertContains(
+            regular.get("/"), 'aria-label="Active model: nous/other:free"'
+        )
         reply = regular.post("/chat/send/", {"message": "Use the new default"})
         self.assertEqual([json.loads(chunk) for chunk in reply.streaming_content][-1], {"done": True})
         self.assertEqual(self.requests[-1][2], "Bearer inference-test-key")

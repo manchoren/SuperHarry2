@@ -1722,16 +1722,14 @@ class ChatTests(TestCase):
         )
         self.assertEqual(self.requests, [])
 
-    def test_saved_memory_is_opt_in_at_conversation_creation_and_read_only_afterward(self):
+    def test_saved_memory_defaults_on_for_new_conversations_and_is_read_only_afterward(self):
         self.client.post("/memories/new/", {"content": "Coffee should be served black."})
         self.client.post("/memories/new/", {"content": "Prefer window seats."})
         other = Client()
         other.force_login(get_user_model().objects.create_user(username="another-memory-owner"))
         other.post("/memories/new/", {"content": "Coffee with another account's secret."})
 
-        first = self.client.post("/chat/send/", {
-            "message": "What coffee do I prefer?", "memory_enabled": "on"
-        })
+        first = self.client.post("/chat/send/", {"message": "What coffee do I prefer?"})
         list(first.streaming_content)
         history = first["Location"]
         outbound = json.dumps(self.requests[-1][2])
@@ -1742,8 +1740,8 @@ class ChatTests(TestCase):
         self.assertEqual(other.post(f"{history}memory/", {"memory_enabled": "off"}).status_code, 404)
         self.assertEqual(self.client.post(f"{history}memory/", {"memory_enabled": "off"}).status_code, 404)
         page = self.client.get(history)
-        self.assertContains(page, 'aria-label="Memory: On"')
-        self.assertContains(page, 'title="Memory: On"')
+        self.assertContains(page, 'aria-label="Saved memory is on"')
+        self.assertContains(page, 'title="Saved memory is on"')
         self.assertNotContains(page, "Save memory setting")
         self.assertNotContains(page, 'name="memory_enabled"')
         followup = self.client.post(f"{history}send/", {"message": "Coffee again?"})
@@ -1753,17 +1751,30 @@ class ChatTests(TestCase):
         self.assertNotIn("window seats", outbound)
         self.assertNotIn("another account", outbound)
 
-        separate = self.client.post("/chat/send/", {"message": "Coffee in a separate chat"})
+        separate = self.client.post("/chat/send/", {"message": "Coffee in a separate chat", "memory_enabled": "on"})
         list(separate.streaming_content)
-        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+        self.assertIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
         separate_page = self.client.get(separate["Location"])
-        self.assertContains(separate_page, 'aria-label="Memory: Off"')
+        self.assertContains(separate_page, 'aria-label="Saved memory is on"')
         self.assertNotContains(separate_page, 'name="memory_enabled"')
 
-    def test_new_conversation_memory_choice_is_unchecked_by_default(self):
+    def test_new_conversation_memory_choice_is_checked_by_default(self):
         page = self.client.get("/")
-        self.assertContains(page, "Use saved memories in this conversation")
-        self.assertNotContains(page, 'name="memory_enabled" checked')
+        self.assertContains(page, 'aria-label="Use saved memories in this conversation"')
+        self.assertContains(page, 'name="memory_enabled" value="on" aria-label="Use saved memories in this conversation" aria-describedby="memory-toggle-tooltip" checked')
+
+    def test_user_can_disable_memory_before_first_message(self):
+        self.client.post("/memories/new/", {"content": "Coffee should be served black."})
+        response = self.client.post("/chat/send/", {
+            "message": "What coffee do I prefer?", "memory_enabled": "off"
+        })
+        list(response.streaming_content)
+        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
+        history = response["Location"]
+        self.assertContains(self.client.get(history), 'aria-label="Saved memory is off"')
+        followup = self.client.post(f"{history}send/", {"message": "Coffee again?"})
+        list(followup.streaming_content)
+        self.assertNotIn("Coffee should be served black", json.dumps(self.requests[-1][2]))
 
     def test_text_skill_is_invoked_without_tools(self):
         self.assertContains(self.client.get("/"), "/summarize")

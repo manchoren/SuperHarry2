@@ -17,7 +17,7 @@
 .sh:has(.catalog-theme input[value="light"]:checked) { color-scheme: light; }
 
 @media (prefers-color-scheme: dark) {
-  .sh:not([data-theme], :has(.catalog-theme input:is([value="light"], [value="dark"]):checked)) {
+  :root:not([data-theme]) .sh:not([data-theme], :has(.catalog-theme input:is([value="light"], [value="dark"]):checked)) {
     color-scheme: dark;
   }
 }
@@ -288,10 +288,14 @@
 
 .sh-table-region { overflow-x: auto; border: 1px solid var(--sh-line); border-radius: var(--sh-radius); background: var(--sh-surface); }
 .sh-table { width: 100%; min-width: 35rem; border-collapse: collapse; font-size: .9rem; text-align: start; }
+.sh-table.sh-table-actions { table-layout: auto; }
+.sh-table.sh-table-actions :is(th, td):last-child { width: 1%; white-space: nowrap; }
+.sh-table.sh-table-actions .file-history-actions { white-space: normal; }
 .sh-table thead { background: var(--sh-panel); }
 .sh-table :is(th, td) { padding: .65rem .75rem; border-block-end: 1px solid var(--sh-line); text-align: start; }
 .sh-table tbody tr:last-child > * { border-block-end: 0; }
 .sh-table tbody td:last-child a { white-space: nowrap; }
+.input-upload-form + .sh-table-region { margin-top: 1.25rem; }
 .sh-mobile-tasks { display: none; }
 .sh-task-card { display: grid; gap: .5rem; }
 .sh-facts { display: grid; grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr); gap: .25rem .6rem; font-size: .85rem; }

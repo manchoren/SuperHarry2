@@ -88,7 +88,7 @@ def _response_lines(response, deadline):
                 pass
         try:
             line = response.readline()
-        except (HTTPException, OSError, ValueError) as error:
+        except (HTTPException, OSError, ValueError, AttributeError) as error:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError("Gateway stream exceeded its total time limit") from error
             raise

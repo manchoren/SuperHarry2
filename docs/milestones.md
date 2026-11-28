@@ -14,7 +14,7 @@ The current working environment is Docker Desktop on Windows. Record controlled 
 ## 2. Saved memory
 
 - A user can save, inspect, edit, and delete their own memories.
-- Hosted requests omit saved memory by default. Opting in for one conversation includes relevant memories belonging to its owner and leaves other conversations' settings independent.
+- New conversations include relevant saved memories belonging to their owner by default. Users can turn memory off before the first message. The choice stays independent per conversation, and existing conversations retain their stored setting.
 
 ## 3. Skills and bundled execution
 
