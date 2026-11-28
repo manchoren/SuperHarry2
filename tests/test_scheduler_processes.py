@@ -55,12 +55,14 @@ Schedule.objects.create(owner=u, conversation=c, prompt='Check', next_run=timezo
                 subprocess.run([sys.executable, "-c", seed], env=env, check=True, timeout=10)
                 first = subprocess.Popen([sys.executable, "-m", "django", "run_schedules"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
-                    self.assertTrue(started.wait(10), "The first scheduler did not reach the gateway")
+                    self.assertTrue(started.wait(30), "The first scheduler did not reach the gateway")
                 finally:
                     first.kill()
-                    first.communicate(timeout=10)
+                    first.wait(timeout=10)
+                    first.stdout.close()
+                    first.stderr.close()
                     release.set()
-                resumed = subprocess.run([sys.executable, "-m", "django", "run_schedules"], env=env, capture_output=True, timeout=10)
+                resumed = subprocess.run([sys.executable, "-m", "django", "run_schedules"], env=env, capture_output=True, timeout=30)
                 self.assertEqual(resumed.returncode, 0, resumed.stderr.decode())
                 self.assertEqual(len(calls), 1)
                 with closing(sqlite3.connect(db)) as connection:

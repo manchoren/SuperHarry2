@@ -1,0 +1,16 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SuperHarry2{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+  <link rel="stylesheet" href="{% static 'superharry/components.css' %}">
+  <link rel="stylesheet" href="{% static 'superharry/auth.css' %}">
+  <script src="{% static 'superharry/theme.js' %}"></script>
+</head>
+<body class="sh auth-page">
+  <main class="auth-main">{% block content %}{% endblock %}</main>
+</body>
+</html>

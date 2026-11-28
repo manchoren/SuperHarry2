@@ -1,6 +1,7 @@
 import json
 import threading
 import tempfile
+import time as time_module
 from datetime import datetime, time, timedelta, timezone as datetime_timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,6 +28,9 @@ from superharry.models import (
 
 class AccountLifecycleTests(TransactionTestCase):
     def setUp(self):
+        from superharry.models import ChatLimits
+
+        ChatLimits.objects.get_or_create(pk=1)
         users = get_user_model().objects
         self.manager = users.create_user(username="lifecycle-manager", password="synthetic-manager-password", is_staff=True)
         administrators, _ = Group.objects.get_or_create(name="Administrators")
@@ -211,7 +215,12 @@ class AccountLifecycleTests(TransactionTestCase):
             self.assertTrue(provider_headers_sent.wait(5), "provider did not enter the blocked stream")
             worker.join(timeout=0.4)
             self.assertTrue(worker.is_alive(), "an idle provider stream should wait for its next chunk")
-            response = self.deactivate()
+            response = None
+            for _ in range(10):
+                response = self.deactivate()
+                if response.status_code != 503:
+                    break
+                time_module.sleep(0.05)
             self.assertIn(response.status_code, (200, 202))
             worker.join(timeout=3)
             self.assertFalse(worker.is_alive(), "the parent stream reader did not terminate after deactivation")

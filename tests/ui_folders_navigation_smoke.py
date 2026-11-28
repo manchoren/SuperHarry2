@@ -18,6 +18,7 @@ import django
 django.setup()
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.core.wsgi import get_wsgi_application
@@ -28,6 +29,9 @@ from superharry.models import ArtifactGroup, ChatInput, Conversation, Message, S
 
 call_command("migrate", verbosity=0)
 owner = get_user_model().objects.create_user(username="folders-user", password="synthetic-password-32")
+empty_user = get_user_model().objects.create_user(username="empty-folders-user", password="synthetic-password-32")
+admin = get_user_model().objects.create_user(username="folders-admin", password="synthetic-admin-password-32")
+admin.groups.add(Group.objects.get_or_create(name="Administrators")[0])
 conversation = Conversation.objects.create(owner=owner, title="Folders synthetic conversation")
 prompt = Message.objects.create(conversation=conversation, role="user", content="synthetic attachment")
 chat_input = ChatInput.objects.create(
@@ -75,7 +79,7 @@ try:
         files_tab.click()
         assert page.url.endswith("/files/")
         assert files_tab.get_attribute("aria-current") == "page"
-        page.get_by_role("row").filter(has_text="input.txt").get_by_role("button", name="Details").click()
+        page.get_by_role("row").filter(has_text="input.txt").get_by_role("link", name="Details").click()
         assert page.get_by_role("heading", name="input.txt").is_visible()
         assert page.get_by_role("navigation", name="Folder sections").get_by_role(
             "link", name="Files"
@@ -99,6 +103,17 @@ try:
             "link", name="Inputs"
         ).click()
         assert page.url.endswith("/inputs/")
+        page.goto(base + f"/chat/{conversation.pk}/files/")
+        assert page.get_by_role("navigation", name="Folder sections").get_by_role(
+            "link", name="Files"
+        ).get_attribute("aria-current") == "page"
+        assert page.get_by_role("link", name="output.txt", exact=True).is_visible()
+        assert page.get_by_label("Group for output.txt").is_visible()
+        page.get_by_role("link", name="Review deletion of all versions in output.txt").click()
+        assert page.get_by_role("heading", name="Delete 1 file?").is_visible()
+        assert page.get_by_text("output.txt (generated)").is_visible()
+        page.get_by_role("link", name="Cancel").click()
+        assert page.url.endswith("/files/")
         page.goto(base + f"/files/artifact/{artifact.pk}/")
         page.get_by_role("navigation", name="Folder sections").get_by_role(
             "link", name="Files"
@@ -110,6 +125,28 @@ try:
             page.goto(base + path)
             assert page.get_by_role("navigation", name="Folder sections").is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        empty_page = browser.new_page(viewport={"width": 375, "height": 812})
+        empty_page.goto(base + "/login/")
+        empty_page.get_by_label("Username:").fill("empty-folders-user")
+        empty_page.get_by_label("Password:").fill("synthetic-password-32")
+        empty_page.get_by_role("button", name="Sign in").click()
+        empty_page.goto(base + "/inputs/")
+        assert empty_page.get_by_text("No chat inputs yet").is_visible()
+        empty_page.goto(base + "/files/")
+        assert empty_page.get_by_text("No files found.").is_visible()
+        assert empty_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert empty_page.request.get(base + "/files/audit/").status in (403, 404)
+        empty_page.close()
+        admin_page = browser.new_page()
+        admin_page.goto(base + "/login/")
+        admin_page.get_by_label("Username:").fill("folders-admin")
+        admin_page.get_by_label("Password:").fill("synthetic-admin-password-32")
+        admin_page.get_by_role("button", name="Sign in").click()
+        admin_page.goto(base + "/files/audit/")
+        assert admin_page.get_by_role("heading", name="Administrative file access audit").is_visible()
+        assert admin_page.get_by_role("table").is_visible()
+        assert admin_page.get_by_role("link", name="Folders").get_attribute("aria-current") == "page"
+        admin_page.close()
         browser.close()
     print("Folders navigation browser smoke passed")
 finally:

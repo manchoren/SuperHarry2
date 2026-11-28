@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from io import StringIO
 from unittest.mock import patch
 from uuid import NAMESPACE_URL, uuid5
@@ -44,7 +44,7 @@ class SchedulerTests(TestCase):
                 next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
         clock = [datetime(2026, 1, 1, 12, 59, tzinfo=timezone.utc)]
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             clock[0] = datetime(2026, 1, 1, 13, 1, tzinfo=timezone.utc)
             yield "Completed."
@@ -73,9 +73,10 @@ class SchedulerTests(TestCase):
         page = self.client.get("/schedules/")
         self.assertContains(page, "Private owner task")
         self.assertNotContains(page, "Private other task")
-        self.assertContains(page, "Cancel schedule")
+        self.assertNotContains(page, "Cancel schedule")
+        self.assertContains(page, "View details for scheduled task")
 
-    def test_schedule_menu_is_a_table_with_summary_state_and_relevant_columns(self):
+    def test_schedule_menu_is_a_compact_table_with_summary_state_and_detail_links(self):
         from superharry.models import Schedule, ScheduleOccurrence
 
         owner = get_user_model().objects.create_user(username="table-owner")
@@ -100,15 +101,28 @@ class SchedulerTests(TestCase):
         response = self.client.get("/schedules/")
 
         self.assertEqual(response.status_code, 200)
-        for heading in ("Task", "Prompt", "Conversation", "Status", "Next execution", "Latest outcome", "Preferred model", "Actions"):
+        for heading in ("Task", "Status", "Next execution", "Latest result"):
             self.assertContains(response, heading)
         self.assertContains(response, "<table", html=False)
         self.assertContains(response, "Scheduled")
         self.assertContains(response, "complete")
-        self.assertContains(response, "test/model")
+        self.assertNotContains(response, "Preferred model")
+        self.assertNotContains(response, "Save model")
+        self.assertNotContains(response, "Cancel schedule")
         self.assertContains(response, "/schedules/%s/" % schedule.pk)
-        self.assertContains(response, prompt[:100])
+        self.assertContains(response, "Review the daily report and identify any unusual changes.")
         self.assertNotContains(response, prompt)
+        self.assertContains(response, "Operations")
+
+    def test_schedule_menu_has_an_actionable_empty_state(self):
+        owner = get_user_model().objects.create_user(username="empty-schedule-owner")
+        self.client.force_login(owner)
+
+        response = self.client.get("/schedules/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No scheduled tasks")
+        self.assertContains(response, "next run and latest result")
 
     def test_schedule_detail_shows_full_prompt_context_and_permitted_actions(self):
         from superharry.models import Schedule, ScheduleOccurrence
@@ -127,6 +141,21 @@ class SchedulerTests(TestCase):
             weekday=2,
             preferred_model="test/model",
         )
+        parent_schedule = Schedule.objects.create(
+            owner=owner,
+            conversation=conversation,
+            prompt="Parent scheduled task",
+            next_run=None,
+            timezone="UTC",
+            repetition="once",
+        )
+        parent_occurrence = ScheduleOccurrence.objects.create(
+            schedule=parent_schedule,
+            due_at=datetime(2025, 12, 31, 12, tzinfo=timezone.utc),
+            status="complete",
+        )
+        schedule.created_by = parent_occurrence
+        schedule.save(update_fields=("created_by",))
         ScheduleOccurrence.objects.create(
             schedule=schedule,
             due_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
@@ -143,8 +172,26 @@ class SchedulerTests(TestCase):
         self.assertContains(response, "Weekly")
         self.assertContains(response, "test/model")
         self.assertContains(response, "Synthetic outcome details")
+        self.assertContains(response, "Created by")
+        self.assertContains(response, f"Scheduled task #{parent_schedule.pk}")
         self.assertContains(response, "Save model")
         self.assertContains(response, "Cancel schedule")
+
+        with patch("superharry.chat.available_routes", return_value=["test/model"]):
+            model_response = self.client.post(
+                f"/schedules/{schedule.pk}/model/",
+                {"model": "test/model", "return_to": "detail"},
+            )
+        self.assertEqual(model_response.status_code, 302)
+        self.assertEqual(model_response["Location"], f"/schedules/{schedule.pk}/")
+        cancel_response = self.client.post(
+            f"/schedules/{schedule.pk}/cancel/", {"return_to": "detail"}
+        )
+        self.assertEqual(cancel_response.status_code, 302)
+        self.assertEqual(cancel_response["Location"], f"/schedules/{schedule.pk}/")
+        canceled_detail = self.client.get(f"/schedules/{schedule.pk}/")
+        self.assertContains(canceled_detail, "Canceled")
+        self.assertNotContains(canceled_detail, "Cancel schedule")
 
     def test_schedule_detail_hides_another_users_schedule(self):
         from superharry.models import Schedule
@@ -189,7 +236,7 @@ class SchedulerTests(TestCase):
             repetition="daily", wall_time=time(12), preferred_model="test/model")
         self.client.force_login(owner)
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             self.client.post(f"/schedules/{schedule.pk}/cancel/")
             yield "Finished."
@@ -212,7 +259,7 @@ class SchedulerTests(TestCase):
             next_run=datetime(2026, 3, 7, 7, 30, tzinfo=timezone.utc), timezone="America/New_York",
             repetition="daily", wall_time=time(2, 30), preferred_model="test/model")
 
-        def failure(messages, *, route_id, on_submit, tools=None):
+        def failure(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             raise GatewayFailure("Unavailable")
             yield
@@ -237,7 +284,7 @@ class SchedulerTests(TestCase):
             next_run=datetime(2026, 10, 25, 5, 30, tzinfo=timezone.utc), timezone="America/New_York",
             repetition="weekly", wall_time=time(1, 30), weekday=6, preferred_model="test/model")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Checked."
 
@@ -260,7 +307,7 @@ class SchedulerTests(TestCase):
             next_run=datetime(2026, 3, 7, 14, tzinfo=timezone.utc), timezone="America/New_York",
             repetition="daily", wall_time=time(9), preferred_model="test/model")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Checked."
 
@@ -287,7 +334,7 @@ class SchedulerTests(TestCase):
         key = uuid5(NAMESPACE_URL, f"superharry:schedule-occurrence:{occurrence.pk}")
         ChatSubmission.objects.create(owner=owner, key=key, reply=reply, fingerprint="reserved")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Recovered reserved work."
 
@@ -328,7 +375,7 @@ class SchedulerTests(TestCase):
         Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
             next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             call_command("run_schedules", stdout=StringIO())
             yield "Completed once."
@@ -349,15 +396,16 @@ class SchedulerTests(TestCase):
             next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
         self.client.force_login(owner)
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             call_command("recover_chat_attempts", stdout=StringIO())
             self.assertEqual(self.client.post("/chat/send/", {"message": "Another request"}).status_code, 409)
             yield "Finished."
 
-        with patch("superharry.chat.stream_reply", side_effect=response):
-            with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
-                call_command("run_schedules", stdout=StringIO())
+        with patch("superharry.chat.available_route_catalog", return_value={"test/model": {}}):
+            with patch("superharry.chat.stream_reply", side_effect=response):
+                with patch("superharry.scheduler.timezone.now", return_value=datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc)):
+                    call_command("run_schedules", stdout=StringIO())
         self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Finished.")
 
     def test_restart_keeps_partial_submitted_reply_without_resubmitting(self):
@@ -393,7 +441,7 @@ class SchedulerTests(TestCase):
             next_run=None, timezone="UTC", repetition="once", preferred_model="test/model")
         ScheduleOccurrence.objects.create(schedule=schedule, due_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), status="claimed")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Recovered work completed."
 
@@ -412,10 +460,12 @@ class SchedulerTests(TestCase):
             next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
         self.client.force_login(owner)
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
-            self.assertContains(self.client.get(f"/chat/{conversation.pk}/"), "Cancel schedule")
-            self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/cancel/").status_code, 302)
+            self.assertContains(self.client.get(f"/schedules/{schedule.pk}/"), "Cancel schedule")
+            canceled = self.client.post(f"/schedules/{schedule.pk}/cancel/", {"return_to": "detail"})
+            self.assertEqual(canceled.status_code, 302)
+            self.assertEqual(canceled["Location"], f"/schedules/{schedule.pk}/")
             yield "Completed after cancellation."
 
         with patch("superharry.chat.stream_reply", side_effect=response):
@@ -434,7 +484,7 @@ class SchedulerTests(TestCase):
         Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
             next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "123456789"
 
@@ -508,7 +558,7 @@ class SchedulerTests(TestCase):
         Schedule.objects.create(owner=owner, conversation=conversation, prompt="Check the report",
             next_run=datetime(2026, 1, 1, 12, tzinfo=timezone.utc), timezone="UTC", repetition="once", preferred_model="test/model")
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Delayed work completed."
 
@@ -550,7 +600,7 @@ class SchedulerTests(TestCase):
             timezone="UTC", repetition="once", preferred_model="test/model",
         )
 
-        def response(messages, *, route_id, on_submit, tools=None):
+        def response(messages, *, route_id, on_submit, tools=None, reasoning_effort="none"):
             on_submit()
             yield "Report checked."
 

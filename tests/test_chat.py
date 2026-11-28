@@ -1184,7 +1184,8 @@ class ChatTests(TestCase):
         stranger.force_login(get_user_model().objects.create_user(username="other"))
         self.assertEqual(stranger.post(f"/schedules/{schedule.pk}/model/", {"model": "test/alternate"}).status_code, 404)
         self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/model/", {"model": "test/alternate"}).status_code, 302)
-        self.assertContains(self.client.get("/schedules/"), "test/alternate")
+        self.assertContains(self.client.get(f"/schedules/{schedule.pk}/"), "test/alternate")
+        self.assertNotContains(self.client.get("/schedules/"), "test/alternate")
         self.assertEqual(self.client.post(f"/schedules/{schedule.pk}/model/", {"model": ""}).status_code, 302)
         ChatRoute.select("test/alternate")
         with patch("superharry.scheduler.timezone.now", return_value=datetime(2099, 1, 1, 12, 1, tzinfo=timezone.utc)):
@@ -1213,7 +1214,7 @@ class ChatTests(TestCase):
         self.assertContains(page, "Review the report")
         self.assertContains(page, "America/New_York")
         self.assertContains(page, "Daily")
-        self.assertContains(page, "Cancel schedule")
+        self.assertContains(page, "View task details")
 
     def test_schedule_uses_the_explicit_configured_model(self):
         arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T12:00:00Z", "preferred_model": "test/alternate"})
@@ -1258,7 +1259,7 @@ class ChatTests(TestCase):
         page = self.client.get(response["Location"])
         self.assertContains(page, "Check the report")
         self.assertContains(page, "America/Guayaquil")
-        self.assertContains(page, "Cancel schedule")
+        self.assertContains(page, "View task details")
 
     def test_created_schedule_runs_and_reply_is_identified_in_chat(self):
         arguments = json.dumps({"prompt": "Review the report", "due_at": "2099-01-01T12:00:00Z"})

@@ -1,13 +1,8 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Delete account {{ account.username }}{% endblock %}
-{% block content %}
-<header class="listing-header">
-  <div>
-    <h1>Delete account permanently</h1>
-    <p class="muted">This action cannot be undone. The account will first be suspended while ongoing work is stopped.</p>
-  </div>
-</header>
-<section class="account-delete-consequences" aria-labelledby="deletion-consequences-title">
+{% block ui_content %}
+<header class="sh-heading"><div><h1>Delete account permanently</h1><p class="sh-muted">This action cannot be undone. The account will first be suspended while ongoing work is stopped.</p></div></header>
+<section class="sh-card sh-stack" aria-labelledby="deletion-consequences-title">
   <h2 id="deletion-consequences-title">Data that will be removed</h2>
   <ul>
     <li>{{ consequences.conversations }} conversation(s), including messages and attachments</li>
@@ -20,14 +15,15 @@
   <p>Owned local skills are shared for use by other users. Deleting them will stop other users from running those skills{% if consequences.shared_skill_users %} and cancel active runs for {{ consequences.shared_skill_users }} other user(s){% endif %}. Their existing results and artifacts remain theirs.</p>
   <p>Account and administrative file-access audit records will remain, with account identity and role classification preserved. Private content and file names will be removed from those records.</p>
 </section>
-{% if form_error %}<p class="form-error" role="alert">{{ form_error }}</p>{% endif %}
-<form method="post" class="account-delete-form">
+{% if form_error %}<p class="sh-notice sh-notice-error" role="alert">{{ form_error }}</p>{% endif %}
+<form method="post" class="sh-card sh-stack">
   {% csrf_token %}
-  <label for="id_confirmation">Type <strong>{{ account.username }}</strong> to confirm</label>
-  <input id="id_confirmation" name="confirmation" autocomplete="off" required>
-  <div class="listing-detail-actions">
-    <button class="listing-action listing-danger-action" type="submit">Delete account and owned data</button>
-    <a class="listing-action" href="{% url 'account-detail' account.pk %}">Cancel</a>
+  <label class="sh-field" for="id_confirmation">Type <strong>{{ account.username }}</strong> to confirm
+    <input id="id_confirmation" name="confirmation" autocomplete="off" required>
+  </label>
+  <div class="sh-actions">
+    <button class="sh-button sh-button-danger" type="submit">Delete account and owned data</button>
+    <a class="sh-button sh-button-secondary" href="{% url 'account-detail' account.pk %}">Cancel</a>
   </div>
 </form>
 {% endblock %}

@@ -29,15 +29,23 @@
     const toggle = document.querySelector(".menu-toggle");
     if (toggle) {
       const mobile = window.matchMedia("(max-width: 50rem)");
+      const sidebar = document.querySelector("#site-sidebar");
       const setOpen = (open) => {
+        const focusInsidePanel = sidebar?.contains(document.activeElement);
         document.body.classList.toggle("sidebar-closed", !open);
         toggle.setAttribute("aria-expanded", String(open));
+        if (!open && focusInsidePanel) toggle.focus();
       };
       setOpen(!mobile.matches);
       toggle.addEventListener("click", () => setOpen(toggle.getAttribute("aria-expanded") !== "true"));
       document.querySelector(".sidebar-close")?.addEventListener("click", () => setOpen(false));
       mobile.addEventListener("change", () => setOpen(!mobile.matches));
-      document.addEventListener("keydown", (event) => { if (event.key === "Escape" && mobile.matches) { setOpen(false); toggle.focus(); } });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && toggle.getAttribute("aria-expanded") === "true") {
+          setOpen(false);
+          toggle.focus();
+        }
+      });
     }
   });
 })();

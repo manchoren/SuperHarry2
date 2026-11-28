@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
     settings.SKILL_SPOOL = directory
     gateway = patch("superharry.chat.stream_reply", side_effect=lambda *args, **kwargs: (text for text in ["saved"]))
     gateway.start()
+    patch("superharry.chat.available_route_catalog", return_value={"fixture/model": {"id": "fixture/model"}}).start()
     user = get_user_model().objects.create_user(username="preview-user", password="synthetic-password-32")
     admin = get_user_model().objects.create_user(username="history-admin", password="synthetic-admin-password-32")
     admin.groups.add(Group.objects.get_or_create(name="Administrators")[0])
@@ -146,10 +147,10 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             assert page.get_by_role("table").is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
             local_csv_row = page.get_by_role("row").filter(has_text="local.csv")
-            local_csv_row.get_by_role("group", name="File actions").get_by_role("button", name="Download").focus()
+            local_csv_row.get_by_role("group", name="File actions").get_by_role("link", name="Download").focus()
             page.keyboard.press("Tab")
-            assert page.evaluate("document.activeElement.tagName") == "BUTTON"
-            local_csv_row.get_by_role("button", name="Delete").click()
+            assert page.evaluate("document.activeElement.tagName") == "A"
+            local_csv_row.get_by_role("link", name="Delete").click()
             assert page.get_by_role("heading", name="Delete 1 file?").is_visible()
             page.get_by_role("button", name="Confirm deletion").click()
             page.goto(f"http://127.0.0.1:{server.server_port}/chat/{conversation.pk}/")
@@ -166,7 +167,7 @@ with tempfile.TemporaryDirectory(prefix="superharry-preview-") as directory:
             page.get_by_role("button", name="Show files").click()
             assert page.get_by_role("button", name="Review deletion").is_enabled()
             local_pdf_row = page.get_by_role("row").filter(has_text="local.pdf")
-            local_pdf_row.get_by_role("button", name="Download").click()
+            local_pdf_row.get_by_role("link", name="Download").click()
             page.get_by_role("button", name="Administrative access audit").click()
             assert page.get_by_text("download", exact=False).count() > 0
             browser.close()

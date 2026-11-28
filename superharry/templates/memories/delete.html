@@ -1,13 +1,12 @@
-{% extends "memories/base.html" %}
-
+{% extends 'ui/base.html' %}
 {% block title %}Delete memory{% endblock %}
-
-{% block content %}
-  <h1>Delete memory?</h1>
-  <article><p>{{ object.content }}</p></article>
-  <form method="post">
-    {% csrf_token %}
-    <button type="submit">Delete memory</button>
-    <a href="{% url 'memories' %}">Cancel</a>
-  </form>
+{% block ui_content %}
+<nav aria-label="Breadcrumb"><a href="{% url 'memories' %}">Saved memories</a></nav>
+<header class="sh-heading"><div><h1>Delete memory?</h1><p class="sh-muted">This permanently removes the memory from your account.</p></div></header>
+<article class="sh-card"><p>{{ object.content }}</p></article>
+<form method="post" class="sh-actions" style="margin-top: 1rem">
+  {% csrf_token %}
+  <button class="sh-button sh-button-danger" type="submit">Delete memory</button>
+  <a class="sh-button sh-button-secondary" href="{% url 'memories' %}">Cancel</a>
+</form>
 {% endblock %}

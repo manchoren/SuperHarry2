@@ -1,0 +1,315 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SuperHarry · Component library</title>
+  <link rel="stylesheet" href="{% static 'superharry/components.css' %}">
+</head>
+<body class="sh catalog">
+  <svg class="sh-sr-only" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 10h8"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="icon-calendar" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M8 3v6m8-6v6M4 11h16m-12 5h2m4 0h2"/></symbol>
+    <symbol id="icon-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2m1-15a3 3 0 0 1 0 6m2 3a4 4 0 0 1 3 4v2"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/></symbol>
+    <symbol id="icon-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="icon-clip" viewBox="0 0 24 24"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a4 4 0 0 1-6-6l8-8a2 2 0 0 1 3 3l-7 7"/></symbol>
+    <symbol id="icon-skill" viewBox="0 0 24 24"><path d="m12 3 2.4 5.6L20 11l-5.6 2.4L12 19l-2.4-5.6L4 11l5.6-2.4L12 3Zm7 13v5m-2.5-2.5h5"/></symbol>
+    <symbol id="icon-audit" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6m-6 5h6"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-send" viewBox="0 0 24 24"><path d="m3 4 18 8-18 8 3-8-3-8Zm3 8h15"/></symbol>
+  </svg>
+
+  <a class="sh-skip" href="#content">Skip to examples</a>
+  <header class="catalog-header">
+    <a class="catalog-brand" href="#top"><span class="sh-monogram" aria-hidden="true">S</span> SuperHarry</a>
+    <nav class="catalog-jumps" aria-label="Catalog sections">
+      <a href="#chat">Chat</a><a href="#schedules">Schedules</a><a href="#accounts">Accounts</a><a href="#components">Components</a>
+    </nav>
+    <fieldset class="catalog-theme">
+      <legend class="sh-sr-only">Appearance</legend>
+      <label><input class="sh-sr-only" type="radio" name="theme" value="light">Light</label>
+      <label><input class="sh-sr-only" type="radio" name="theme" value="dark">Dark</label>
+      <label><input class="sh-sr-only" type="radio" name="theme" value="system" checked>System</label>
+    </fieldset>
+  </header>
+
+  <main class="catalog-main" id="content">
+    <header class="catalog-intro" id="top">
+      <h1>Component library</h1>
+      <p>Preview the first SuperHarry screens and copy their HTML patterns. The examples use sample data and local controls.</p>
+    </header>
+
+    <section class="catalog-section" id="chat" aria-labelledby="chat-example">
+      <header class="catalog-section-heading"><h2 id="chat-example">Chat</h2><p>Conversation history, scheduled work and the message composer.</p></header>
+      <div class="sh-screen sh-chat-screen">
+        <nav class="sh-rail" aria-label="Application navigation, Chat preview">
+          <a href="#chat" aria-current="page" data-tooltip="Chat" aria-label="Chat"><svg class="sh-icon"><use href="#icon-chat"/></svg></a>
+          <a href="#folders-example" data-tooltip="Folders" aria-label="Folders"><svg class="sh-icon"><use href="#icon-folder"/></svg></a>
+          <a href="#schedules" data-tooltip="Schedules" aria-label="Schedules"><svg class="sh-icon"><use href="#icon-calendar"/></svg></a>
+          <a href="#accounts" data-tooltip="Accounts" aria-label="Accounts"><svg class="sh-icon"><use href="#icon-users"/></svg></a>
+        </nav>
+        <details class="sh-history" open>
+          <summary class="sh-history-toggle"><svg class="sh-icon"><use href="#icon-panel"/></svg> Conversations</summary>
+          <div class="sh-history-content">
+            <div class="sh-history-header">
+              <strong>SuperHarry</strong>
+              <details class="sh-search">
+                <summary class="sh-button sh-button-quiet" aria-label="Search conversations"><svg class="sh-icon"><use href="#icon-search"/></svg></summary>
+                <label class="sh-field">Search conversations
+                  <input type="search" list="conversation-titles" placeholder="Search by title">
+                </label>
+                <datalist id="conversation-titles"><option value="Weekly inventory report"><option value="Monthly handoff notes"></datalist>
+              </details>
+            </div>
+            <a class="sh-button sh-button-secondary sh-new-chat" href="#new-chat-example"><svg class="sh-icon"><use href="#icon-plus"/></svg> New chat</a>
+            <nav class="sh-history-list" aria-label="Conversations">
+              <a href="#conversation" aria-current="page">Weekly inventory report</a>
+              <a href="#monthly-transcript">Monthly handoff notes</a>
+            </nav>
+          </div>
+        </details>
+        <div class="sh-screen-content sh-chat-content" id="conversation">
+          <header class="sh-heading">
+            <h3>Weekly inventory report</h3>
+            <a class="sh-button sh-button-quiet" href="#conversation-files"><svg class="sh-icon"><use href="#icon-folder"/></svg> Conversation files</a>
+          </header>
+          <div class="sh-schedule-line">
+            <svg class="sh-icon"><use href="#icon-calendar"/></svg><span>Scheduled · Mon, Nov 30 at 9:00 AM</span>
+            <a href="#schedule-detail">View schedule</a>
+          </div>
+          <div class="sh-transcript">
+            <article class="sh-message sh-message-user"><p class="sh-message-label">You</p><p>Summarize inventory and flag items below target.</p></article>
+            <article class="sh-message">
+              <p class="sh-message-label">SuperHarry</p>
+              <h4>Inventory review</h4>
+              <p>Restock six workbooks. Field notebooks are above target.</p>
+            </article>
+          </div>
+          <div class="sh-composer">
+            <label class="sh-sr-only" for="chat-message">Message</label>
+            <textarea id="chat-message" rows="2" placeholder="Ask SuperHarry"></textarea>
+            <div class="sh-composer-toolbar">
+              <details class="sh-disclosure">
+                <summary class="sh-button sh-button-quiet"><svg class="sh-icon"><use href="#icon-clip"/></svg> Attach files</summary>
+                <div class="sh-popover"><label class="sh-field">Choose files <input type="file" multiple></label></div>
+              </details>
+              <details class="sh-disclosure">
+                <summary class="sh-button sh-button-quiet"><svg class="sh-icon"><use href="#icon-skill"/></svg> Skills</summary>
+                <div class="sh-popover"><label class="sh-check"><input type="checkbox"> Summarize</label></div>
+              </details>
+              <label class="sh-model">Model <select aria-label="Model"><option>Auto</option><option>Example model</option></select></label>
+              <button class="sh-button sh-button-primary sh-send" type="button"><svg class="sh-icon"><use href="#icon-send"/></svg> Send</button>
+            </div>
+          </div>
+          <p class="sh-muted sh-memory-state">Memory: Off</p>
+          <details class="sh-example-detail"><summary>Conversation files</summary><div class="sh-detail-body" id="conversation-files"><p>weekly-inventory.csv</p></div></details>
+          <details class="sh-example-detail"><summary>Monthly handoff notes</summary><div class="sh-detail-body" id="monthly-transcript"><p>The latest handoff still needs a delivery date.</p></div></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="catalog-section" id="schedules" aria-labelledby="schedules-example">
+      <header class="catalog-section-heading"><h2 id="schedules-example">Schedules</h2><p>The list shows when tasks run and how they ended. Editing stays in the detail.</p></header>
+      <div class="sh-screen">
+        <nav class="sh-rail" aria-label="Application navigation, Schedules preview">
+          <a href="#chat" data-tooltip="Chat" aria-label="Chat"><svg class="sh-icon"><use href="#icon-chat"/></svg></a>
+          <a href="#folders-example" data-tooltip="Folders" aria-label="Folders"><svg class="sh-icon"><use href="#icon-folder"/></svg></a>
+          <a href="#schedules" aria-current="page" data-tooltip="Schedules" aria-label="Schedules"><svg class="sh-icon"><use href="#icon-calendar"/></svg></a>
+          <a href="#accounts" data-tooltip="Accounts" aria-label="Accounts"><svg class="sh-icon"><use href="#icon-users"/></svg></a>
+        </nav>
+        <div class="sh-screen-content">
+          <header class="sh-heading"><h3>Schedules</h3></header>
+          <div class="sh-table-region" role="region" tabindex="0" aria-label="Scheduled tasks">
+            <table class="sh-table">
+              <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Next execution</th><th scope="col">Last result</th><th scope="col">Actions</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">Weekly inventory report</th><td><span class="sh-status sh-status-info">Scheduled</span></td><td>Nov 30, 9:00 AM</td><td><span class="sh-status sh-status-success">Completed</span></td><td><a href="#schedule-detail">View details<span class="sh-sr-only"> for Weekly inventory report</span></a></td></tr>
+                <tr><th scope="row">Monthly handoff notes</th><td><span class="sh-status sh-status-info">Scheduled</span></td><td>Dec 1, 10:00 AM</td><td><span class="sh-status sh-status-warning">Needs user input</span></td><td><a href="#alternate-conversation">View details<span class="sh-sr-only"> for Monthly handoff notes</span></a></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="sh-mobile-tasks">
+            <article class="sh-card sh-task-card"><h4>Weekly inventory report</h4><dl class="sh-facts"><dt>Status</dt><dd><span class="sh-status sh-status-info">Scheduled</span></dd><dt>Next execution</dt><dd>Nov 30, 9:00 AM</dd><dt>Last result</dt><dd>Completed</dd></dl><a href="#schedule-detail">View details<span class="sh-sr-only"> for Weekly inventory report</span></a></article>
+            <article class="sh-card sh-task-card"><h4>Monthly handoff notes</h4><dl class="sh-facts"><dt>Status</dt><dd><span class="sh-status sh-status-info">Scheduled</span></dd><dt>Next execution</dt><dd>Dec 1, 10:00 AM</dd><dt>Last result</dt><dd>Needs user input</dd></dl><a href="#alternate-conversation">View details<span class="sh-sr-only"> for Monthly handoff notes</span></a></article>
+          </div>
+          <details class="sh-example-detail">
+            <summary>Weekly inventory report · task detail</summary>
+            <div class="sh-detail-body" id="schedule-detail">
+              <label class="sh-field">Preferred model <select><option>Use active model</option><option>Example model</option></select></label>
+              <div class="sh-actions"><button class="sh-button sh-button-secondary" type="button">Save model</button><a class="sh-button sh-button-danger" href="#confirmation-example">Cancel schedule</a></div>
+            </div>
+          </details>
+          <details class="sh-example-detail"><summary>Monthly handoff notes · task detail</summary><div class="sh-detail-body" id="alternate-conversation"><p>The last run needs user input.</p></div></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="catalog-section" id="accounts" aria-labelledby="accounts-example">
+      <header class="catalog-section-heading"><h2 id="accounts-example">Accounts</h2><p>Account audit sits next to account creation. The content uses the full width beside the icon rail.</p></header>
+      <div class="sh-screen">
+        <nav class="sh-rail" aria-label="Application navigation, Accounts preview">
+          <a href="#chat" data-tooltip="Chat" aria-label="Chat"><svg class="sh-icon"><use href="#icon-chat"/></svg></a>
+          <a href="#folders-example" data-tooltip="Folders" aria-label="Folders"><svg class="sh-icon"><use href="#icon-folder"/></svg></a>
+          <a href="#schedules" data-tooltip="Schedules" aria-label="Schedules"><svg class="sh-icon"><use href="#icon-calendar"/></svg></a>
+          <a href="#accounts" aria-current="page" data-tooltip="Accounts" aria-label="Accounts"><svg class="sh-icon"><use href="#icon-users"/></svg></a>
+        </nav>
+        <div class="sh-screen-content">
+          <header class="sh-heading">
+            <h3>Accounts</h3>
+            <div class="sh-actions">
+              <a class="sh-button sh-button-secondary" href="#account-audit"><svg class="sh-icon"><use href="#icon-audit"/></svg> Account audit</a>
+              <a class="sh-button sh-button-primary" href="#account-form">Create account</a>
+            </div>
+          </header>
+          <div class="sh-filters" role="group" aria-label="Example account filters">
+            <label class="sh-field">Username or email <input type="search" placeholder="Search accounts"></label>
+            <label class="sh-field">Status <select><option>All statuses</option><option>Active</option><option>Inactive</option></select></label>
+            <label class="sh-field">Role <select><option>All roles</option><option>Regular</option><option>Administrator</option></select></label>
+            <button class="sh-button sh-button-secondary" type="button">Apply filters</button>
+          </div>
+          <div class="sh-table-region" role="region" tabindex="0" aria-label="Account list">
+            <table class="sh-table">
+              <thead><tr><th scope="col">Username</th><th scope="col">Name and email</th><th scope="col">Role</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">alex</th><td>Alex Carter<br><span class="sh-muted">alex@example.com</span></td><td>Administrator</td><td><span class="sh-status sh-status-success">Active</span></td></tr>
+                <tr><th scope="row">jordan</th><td>Jordan Lee<br><span class="sh-muted">jordan@example.com</span></td><td>Regular</td><td><span class="sh-status">Inactive</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <details class="sh-example-detail"><summary>Account audit</summary><div class="sh-detail-body" id="account-audit"><p><strong>Alex Carter</strong> created the account <strong>jordan</strong>.</p><p class="sh-muted">Nov 27, 2026 · 10:15 AM</p></div></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="catalog-section" id="components" aria-labelledby="components-heading">
+      <header class="catalog-section-heading">
+        <h2 id="components-heading">Components</h2>
+        <p>Load <a href="components.css">components.css</a>, add <code>class="sh"</code> to the container, then copy the HTML from an example. The SVG symbols in this page provide the outline icons.</p>
+      </header>
+      <div class="catalog-specimens">
+        <section class="catalog-specimen" aria-labelledby="actions-heading">
+          <h3 id="actions-heading">Actions</h3>
+          <p>Use one primary action per area. Use quiet actions for composer tools and danger styling for destructive commands.</p>
+          <div class="sh-actions">
+            <button class="sh-button sh-button-primary" type="button">Save changes</button>
+            <button class="sh-button sh-button-secondary" type="button">Preview</button>
+            <button class="sh-button sh-button-quiet" type="button">Attach files</button>
+            <button class="sh-button sh-button-danger" type="button">Delete file</button>
+            <button class="sh-button sh-button-primary" type="button" disabled>Send</button>
+          </div>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;button class="sh-button sh-button-primary" type="submit"&gt;
+  Save changes
+&lt;/button&gt;
+&lt;button class="sh-button sh-button-quiet" type="button"&gt;
+  Attach files
+&lt;/button&gt;</code></pre></details>
+        </section>
+        <section class="catalog-specimen" aria-labelledby="status-heading">
+          <h3 id="status-heading">Status and feedback</h3>
+          <p>Keep the status in text. Use an alert for a new error near the control that needs attention.</p>
+          <div class="sh-actions">
+            <span class="sh-status sh-status-info">Scheduled</span><span class="sh-status sh-status-success">Completed</span><span class="sh-status sh-status-warning">Needs user input</span><span class="sh-status">Canceled</span>
+          </div>
+          <p class="sh-notice sh-notice-error">Choose a PNG or JPEG and try again.</p>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;span class="sh-status sh-status-warning"&gt;
+  Needs user input
+&lt;/span&gt;
+&lt;p class="sh-notice sh-notice-error" role="alert"&gt;
+  Choose a PNG or JPEG and try again.
+&lt;/p&gt;</code></pre></details>
+        </section>
+        <section class="catalog-specimen" id="new-chat-example" aria-labelledby="memory-heading">
+          <h3 id="memory-heading">New chat and memory</h3>
+          <p>Start with memory unchecked. In an existing chat, show the current setting as text.</p>
+          <div class="sh-card sh-stack">
+            <label class="sh-check"><input type="checkbox"> Use saved memories in this conversation</label>
+            <label class="sh-field">Message <textarea rows="2" placeholder="Ask SuperHarry"></textarea></label>
+          </div>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;label class="sh-check"&gt;
+  &lt;input type="checkbox" name="use_memory"&gt;
+  Use saved memories in this conversation
+&lt;/label&gt;</code></pre></details>
+        </section>
+        <section class="catalog-specimen" id="folders-example" aria-labelledby="folders-heading">
+          <h3 id="folders-heading">Folders and empty states</h3>
+          <p>Use navigation links for route-level sections. Keep one clear next action in an empty list.</p>
+          <nav class="sh-tabs" aria-label="Folder sections"><a href="#folders-example" aria-current="page">Inputs</a><a href="#files-example">Files</a></nav>
+          <div class="sh-empty"><strong>No inputs yet</strong><p>Upload a file to use in a conversation.</p><label class="sh-field">Choose a file <input type="file"></label></div>
+          <details class="sh-example-detail"><summary>Files example</summary><div class="sh-detail-body" id="files-example"><p>Generated files appear here after a run creates them.</p></div></details>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;nav class="sh-tabs" aria-label="Folder sections"&gt;
+  &lt;a href="/inputs/" aria-current="page"&gt;Inputs&lt;/a&gt;
+  &lt;a href="/files/"&gt;Files&lt;/a&gt;
+&lt;/nav&gt;</code></pre></details>
+        </section>
+        <section class="catalog-specimen" id="account-form" aria-labelledby="fields-heading">
+          <h3 id="fields-heading">Form fields</h3>
+          <p>Keep instructions and errors next to their field. Let labels wrap at narrow widths.</p>
+          <div class="sh-card sh-stack">
+            <label class="sh-field">Username <input type="text" autocomplete="off" aria-describedby="username-help"><small id="username-help">Use letters, numbers and underscores.</small></label>
+            <label class="sh-field">Role <select><option>Regular</option><option>Administrator</option></select></label>
+            <div class="sh-actions"><button class="sh-button sh-button-primary" type="button">Create account</button><a href="#accounts">Cancel</a></div>
+          </div>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;label class="sh-field"&gt;
+  Username
+  &lt;input name="username" aria-describedby="username-help"&gt;
+  &lt;small id="username-help"&gt;Use letters, numbers and underscores.&lt;/small&gt;
+&lt;/label&gt;</code></pre></details>
+        </section>
+        <section class="catalog-specimen" id="confirmation-example" aria-labelledby="confirmation-heading">
+          <h3 id="confirmation-heading">Destructive confirmation</h3>
+          <p>Name the affected item and state what happens before asking for confirmation.</p>
+          <div class="sh-card sh-stack">
+            <h4>Cancel Weekly inventory report?</h4>
+            <p>This task will stop running on its schedule. Previous results stay in the conversation.</p>
+            <div class="sh-actions"><a class="sh-button sh-button-secondary" href="#schedule-detail">Keep schedule</a><button class="sh-button sh-button-danger" type="button">Cancel schedule</button></div>
+          </div>
+          <details class="catalog-code"><summary>HTML</summary><pre><code>&lt;div class="sh-actions"&gt;
+  &lt;a class="sh-button sh-button-secondary" href="/schedules/1/"&gt;Keep schedule&lt;/a&gt;
+  &lt;button class="sh-button sh-button-danger" type="submit"&gt;Cancel schedule&lt;/button&gt;
+&lt;/div&gt;</code></pre></details>
+        </section>
+      </div>
+      <details class="catalog-code catalog-layout-code">
+        <summary>HTML for navigation, layout, composer and tables</summary>
+        <pre><code>&lt;!-- Outside Chat, use .sh-screen and omit .sh-history. --&gt;
+&lt;div class="sh-screen sh-chat-screen"&gt;
+  &lt;nav class="sh-rail" aria-label="Main navigation"&gt;
+    &lt;a href="/" aria-current="page" aria-label="Chat" data-tooltip="Chat"&gt;
+      &lt;svg class="sh-icon" aria-hidden="true"&gt;&lt;use href="#icon-chat"/&gt;&lt;/svg&gt;
+    &lt;/a&gt;
+  &lt;/nav&gt;
+  &lt;details class="sh-history"&gt;
+    &lt;summary class="sh-history-toggle"&gt;Conversations&lt;/summary&gt;
+    &lt;div class="sh-history-content"&gt;…&lt;/div&gt;
+  &lt;/details&gt;
+  &lt;div class="sh-screen-content"&gt;…&lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class="sh-composer"&gt;
+  &lt;label class="sh-sr-only" for="message"&gt;Message&lt;/label&gt;
+  &lt;textarea id="message" name="message" placeholder="Ask SuperHarry"&gt;&lt;/textarea&gt;
+  &lt;div class="sh-composer-toolbar"&gt;
+    &lt;details class="sh-disclosure"&gt;
+      &lt;summary class="sh-button sh-button-quiet"&gt;Attach files&lt;/summary&gt;
+      &lt;div class="sh-popover"&gt;…&lt;/div&gt;
+    &lt;/details&gt;
+    &lt;label class="sh-model"&gt;Model &lt;select name="model"&gt;&lt;option&gt;Auto&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+    &lt;button class="sh-button sh-button-primary sh-send" type="submit"&gt;Send&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class="sh-table-region" role="region" tabindex="0" aria-label="Account list"&gt;
+  &lt;table class="sh-table"&gt;
+    &lt;thead&gt;&lt;tr&gt;&lt;th scope="col"&gt;Username&lt;/th&gt;…&lt;/tr&gt;&lt;/thead&gt;
+    &lt;tbody&gt;&lt;tr&gt;&lt;th scope="row"&gt;alex&lt;/th&gt;…&lt;/tr&gt;&lt;/tbody&gt;
+  &lt;/table&gt;
+&lt;/div&gt;</code></pre>
+      </details>
+    </section>
+  </main>
+  <footer class="catalog-footer"><a href="#top">Back to top</a></footer>
+</body>
+</html>

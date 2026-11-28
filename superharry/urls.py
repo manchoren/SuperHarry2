@@ -2,9 +2,10 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import account_deletion, account_lifecycle, accounts, artifacts, chat, csv_views, file_history, inputs, memories, skill_views, soul
+from . import account_deletion, account_lifecycle, accounts, artifacts, chat, csv_views, file_history, inputs, memories, skill_views, soul, ui_components
 
 urlpatterns = [
+    path("dev/ui-components/", ui_components.catalog, name="ui-component-catalog"),
     path("admin/", admin.site.urls),
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),

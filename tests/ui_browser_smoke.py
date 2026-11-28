@@ -1,6 +1,7 @@
 # Django must be configured before importing the application models.
 # ruff: noqa: E402
 import os
+import json
 import tempfile
 import threading
 from pathlib import Path
@@ -22,6 +23,12 @@ import time
 
 
 class Gateway(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"data": [{"id": "test/free-model"}]}).encode())
+
     def do_POST(self):
         self.rfile.read(int(self.headers["Content-Length"]))
         self.send_response(200)
@@ -42,13 +49,18 @@ class Gateway(BaseHTTPRequestHandler):
 
 
 gateway = HTTPServer(("127.0.0.1", 0), Gateway)
-threading.Thread(target=gateway.serve_forever, daemon=True).start()
+gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+gateway_thread.start()
 settings.OMNIROUTE_URL = "http://127.0.0.1:%s" % gateway.server_port
 settings.OMNIROUTE_API_KEY = "synthetic-key"
 settings.CHAT_MODEL = "test/free-model"
 from django.contrib.auth import get_user_model
 from django.core.wsgi import get_wsgi_application
 from django.contrib.staticfiles.handlers import StaticFilesHandler
+import superharry.chat
+from superharry.gateway import stream_reply
+
+superharry.chat.stream_reply = stream_reply
 
 call_command("migrate", verbosity=0)
 User = get_user_model()
@@ -77,7 +89,18 @@ Schedule.objects.create(
     repetition="daily",
 )
 server = make_server("127.0.0.1", 18765, StaticFilesHandler(get_wsgi_application()))
-threading.Thread(target=server.serve_forever, daemon=True).start()
+from django.db import connections
+
+
+def serve_application():
+    try:
+        server.serve_forever()
+    finally:
+        connections.close_all()
+
+
+server_thread = threading.Thread(target=serve_application, daemon=True)
+server_thread.start()
 from playwright.sync_api import sync_playwright
 
 
@@ -113,6 +136,7 @@ with sync_playwright() as p:
     page.locator("#id_password").fill("synthetic-password-32")
     page.get_by_role("button", name="Sign in").click()
     assert page.get_by_role("heading", name="New chat").is_visible()
+    assert page.get_by_role("navigation", name="Main navigation").get_by_role("link", name="Chat").get_attribute("aria-current") == "page"
     if os.environ.get("UI_LAYOUT_SCREENSHOT"):
         page.screenshot(path=os.environ["UI_LAYOUT_SCREENSHOT"], full_page=True)
     assert page.locator("html").get_attribute("data-theme") == "dark"
@@ -127,6 +151,8 @@ with sync_playwright() as p:
         page.goto("http://127.0.0.1:18765" + path)
         assert page.locator("main").is_visible(), path
         assert page.get_by_role("navigation", name="Main navigation").is_visible(), path
+        assert page.locator("#site-sidebar").count() == 0, path
+        assert page.get_by_role("button", name="Toggle conversations").count() == 0, path
     page.goto("http://127.0.0.1:18765/chat/%s/" % conversation.pk)
     assert page.get_by_text("Incomplete reply").is_visible()
     assert page.get_by_role("button", name="Retry reply").is_visible()
@@ -141,7 +167,7 @@ with sync_playwright() as p:
     avatar_box = avatar.bounding_box()
     assert abs((label_box["y"] + label_box["height"] / 2) - (avatar_box["y"] + avatar_box["height"] / 2)) < 2
     composer_options = page.locator("#composer .composer-options")
-    files_link = composer_options.get_by_role("link", name="Conversation files")
+    files_link = page.get_by_role("link", name="Conversation files")
     assert files_link.is_visible()
     assert composer_options.locator("details.composer-popover summary").nth(0).is_visible()
     assert composer_options.locator("details.composer-popover summary").nth(1).is_visible()
@@ -212,16 +238,36 @@ with sync_playwright() as p:
         page.locator("#messages").get_by_text("Hello controlled gateway").is_visible()
     )
     assert page.get_by_text("Browser streamed response").is_visible()
+    if os.environ.get("UI_CHAT_ONLY") == "1":
+        chat_violations = {}
+        for mode in ("light", "dark"):
+            choose_theme(page, mode)
+            page.add_script_tag(path=axe_script)
+            chat_violations[mode] = page.evaluate(
+                "async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => v.id)"
+            )
+        assert not any(chat_violations.values()), chat_violations
+        print("PASS: Chat retry and streamed send, conversation memory opt-in, responsive sidebar, keyboard focus, axe light/dark")
+        server.shutdown()
+        server_thread.join(timeout=5)
+        server.server_close()
+        gateway.shutdown()
+        gateway_thread.join(timeout=5)
+        gateway.server_close()
+        browser.close()
+        connections.close_all()
+        raise SystemExit(0)
     page.goto("http://127.0.0.1:18765/schedules/")
     assert page.get_by_text("Synthetic task").is_visible()
     assert page.get_by_role("table", name="Your scheduled tasks").is_visible()
-    assert page.get_by_role("columnheader", name="Latest outcome").is_visible()
+    assert page.get_by_role("columnheader", name="Latest result").is_visible()
     page.get_by_role("link", name="View details").click()
     assert page.get_by_role("heading", name="Scheduled task #1").is_visible()
     assert page.get_by_text("Synthetic task", exact=True).is_visible()
     assert page.get_by_role("link", name="Back to schedules").is_visible()
-    page.get_by_role("link", name="Back to schedules").click()
     page.get_by_role("button", name="Cancel schedule").click()
+    assert page.get_by_text("Canceled").is_visible()
+    page.get_by_role("link", name="Back to schedules").click()
     assert page.get_by_text("Canceled").is_visible()
     page.goto("http://127.0.0.1:18765/memories/new/")
     page.locator("textarea").fill("Synthetic memory for browser validation")
@@ -263,11 +309,19 @@ with sync_playwright() as p:
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     page.get_by_role("button", name="Toggle conversations").click()
     assert not page.locator("#site-sidebar").is_visible()
+    toggle = page.get_by_role("button", name="Toggle conversations")
     page.get_by_role("button", name="Toggle conversations").focus()
     page.keyboard.press("Enter")
     assert page.locator("#site-sidebar").is_visible()
     page.keyboard.press("Escape")
     assert not page.locator("#site-sidebar").is_visible()
+    assert toggle.get_attribute("aria-expanded") == "false"
+    assert page.evaluate("document.activeElement === document.querySelector('.menu-toggle')")
+    message_box = page.locator("#message")
+    message_box.focus()
+    page.keyboard.press("Escape")
+    assert not page.locator("#site-sidebar").is_visible()
+    assert page.evaluate("document.activeElement === document.querySelector('#message')")
     page.keyboard.press("Tab")
     assert page.evaluate(
         "getComputedStyle(document.activeElement).outlineStyle !== 'none'"
@@ -307,8 +361,11 @@ with sync_playwright() as p:
     )
     browser.close()
 server.shutdown()
+server_thread.join(timeout=5)
+server.server_close()
 gateway.shutdown()
-from django.db import connections
+gateway_thread.join(timeout=5)
+gateway.server_close()
 
 connections.close_all()
 

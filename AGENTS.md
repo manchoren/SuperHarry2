@@ -15,3 +15,7 @@ Read [the single-context domain documentation guide](docs/agents/domain.md) befo
 ### Implementation and validation
 
 Read [the implementation and validation guide](docs/agents/implementation.md) before implementing a ticket or testing the Docker runtime.
+
+### User interface
+
+For any user-facing screen or reusable UI pattern, read [the UI contribution guide](docs/ui-contribution.md). Use the shared components and update the development catalog when adding a reusable pattern.

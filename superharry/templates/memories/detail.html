@@ -1,13 +1,11 @@
-{% extends "memories/base.html" %}
-
+{% extends 'ui/base.html' %}
 {% block title %}Saved memory{% endblock %}
-
-{% block content %}
-  <nav aria-label="Breadcrumb"><a href="{% url 'memories' %}">Saved memories</a></nav>
-  <h1>Saved memory</h1>
-  <article class="memory-detail"><p>{{ object.content }}</p></article>
-  <div class="listing-actions listing-detail-actions">
-    <a class="listing-action" href="{% url 'memory-edit' object.pk %}">Edit</a>
-    <a class="listing-action listing-danger-action" href="{% url 'memory-delete' object.pk %}">Delete</a>
-  </div>
+{% block ui_content %}
+<nav aria-label="Breadcrumb"><a href="{% url 'memories' %}">Saved memories</a></nav>
+<header class="sh-heading"><div><h1>Saved memory</h1><p class="sh-muted">Private to your account.</p></div></header>
+<article class="sh-card"><p>{{ object.content }}</p></article>
+<div class="sh-actions" style="margin-top: 1rem">
+  <a class="sh-button sh-button-secondary" href="{% url 'memory-edit' object.pk %}">Edit</a>
+  <a class="sh-button sh-button-danger" href="{% url 'memory-delete' object.pk %}">Delete</a>
+</div>
 {% endblock %}

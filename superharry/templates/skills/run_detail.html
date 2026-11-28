@@ -1,11 +1,11 @@
-{% extends "memories/base.html" %}
+{% extends "skills/base.html" %}
 {% load static %}
 {% block title %}Skill result{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'superharry/browser-session.css' %}">{% endblock %}
-{% block content %}
-  <h1>Skill result: {{ job.skill_name }}</h1>
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'superharry/browser-session.css' %}">{% endblock %}
+{% block skill_content %}
+  <header class="sh-heading"><h1>Skill result: {{ job.skill_name }}</h1><span class="sh-status">{{ delivery }}</span></header>
   {% if browser_consent_pending %}
-    <section class="account-panel" aria-labelledby="browser-consent-title">
+    <section class="skill-panel" aria-labelledby="browser-consent-title">
       <h2 id="browser-consent-title">Approve public page reading?</h2>
       <p>This task will open the requested URL or public search results, follow main-page redirects, and may open up to five relevant public links using GET requests. It may also contact third-party public sites for page resources. Those requests pass through the host network mediator; the browser container has no direct network connection. Sites can assign effects to GET requests, and site or resource operators can receive request metadata.</p>
       <p>Without the separate handoff option, this task uses GET requests only and cannot sign in, fill or submit forms, or click links. Do not approve a URL containing confidential information.</p>
@@ -20,12 +20,12 @@
           <p>If you enable the HTTPS handoff, this model route may receive visible form labels and safe field descriptions to prepare one draft: <code>{{ job.execution_payload.action_route_id }}</code>. The form must still pass local checks and you must approve its exact destination and values before it is sent.</p>
         {% endif %}
       {% endif %}
-      <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
+      <form class="sh-stack" method="post" action="{% url 'browser-task-decision' job.job_id %}">
         {% csrf_token %}
         {% if not job.execution_payload.search_query %}<label><input type="checkbox" name="owner_handoff" value="on"> Also allow the HTTPS browser handoff. Sign-in forms are limited to recognizable username and password fields. Other supported form submissions pause for your separate approval of the exact destination and fields. {% if job.execution_payload.action_request %}The agent will prepare only the requested draft after you take control; it will not send until you approve that exact proposal.{% endif %} Payments, purchases, transfers, and card data are always blocked. JavaScript stays off; credentials, cookies, and page captures are not saved by this app.</label>{% endif %}
         {% if not job.execution_payload.search_query %}<label><input type="checkbox" name="continue_with_model" value="on"> Requires the HTTPS browser handoff option above. After you return control, the browser may read up to five relevant links with GET in your authenticated session, then send their visible text and your original request to {{ job.execution_payload.answer_route_id }} for one follow-up answer. It will not click, fill forms, run page scripts, or continue external actions. Credentials, cookies, screenshots, and values you typed during sign-in are excluded; authenticated page text may contain private account information.</label>{% endif %}
-        <button name="decision" value="approve">Approve read-only browsing for this task</button>
-        <button name="decision" value="deny">Deny</button>
+        <button class="sh-button sh-button-primary" name="decision" value="approve">Approve read-only browsing for this task</button>
+        <button class="sh-button sh-button-primary" name="decision" value="deny">Deny</button>
       </form>
     </section>
   {% elif browser_authorized %}
@@ -56,11 +56,11 @@
             </svg>
             <span data-browser-toggle-label>Hide browser</span>
           </button>
-          {% if not browser_handoff_enabled %}<form method="post" action="{% url 'browser-session-screenshot' job.job_id %}" data-screenshot-form>
+          {% if not browser_handoff_enabled %}<form class="sh-stack" method="post" action="{% url 'browser-session-screenshot' job.job_id %}" data-screenshot-form>
             {% csrf_token %}<button type="submit">Save screenshot</button>
           </form>{% endif %}
-          <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
-            {% csrf_token %}<button name="decision" value="cancel">End browser session</button>
+          <form class="sh-stack" method="post" action="{% url 'browser-task-decision' job.job_id %}">
+            {% csrf_token %}<button class="sh-button sh-button-primary" name="decision" value="cancel">End browser session</button>
           </form>
         </div>
         <div class="browser-session__view" data-browser-view>
@@ -70,13 +70,13 @@
         {% if browser_handoff_enabled %}
           <section class="browser-owner-control" aria-label="Manual sign-in control">
             {% if browser_owner_control %}
-              <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
-                {% csrf_token %}<button name="decision" value="return_control">Return control and finish</button>
+              <form class="sh-stack" method="post" action="{% url 'browser-task-decision' job.job_id %}">
+                {% csrf_token %}<button class="sh-button sh-button-primary" name="decision" value="return_control">Return control and finish</button>
               </form>
               <label>Text to type into the page <input type="password" data-owner-text autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="1024"></label>
-              <button type="button" data-owner-type>Type into page</button>
-              <button type="button" data-owner-key="Enter">Press Enter</button>
-              <button type="button" data-owner-key="Tab">Press Tab</button>
+              <button class="sh-button sh-button-secondary" type="button" data-owner-type>Type into page</button>
+              <button class="sh-button sh-button-secondary" type="button" data-owner-key="Enter">Press Enter</button>
+              <button class="sh-button sh-button-secondary" type="button" data-owner-key="Tab">Press Tab</button>
               <form hidden data-owner-csrf>{% csrf_token %}</form>
               <section class="browser-action-review" data-action-review hidden aria-labelledby="browser-action-review-title">
                 <h2 id="browser-action-review-title">Review this form action</h2>
@@ -87,13 +87,13 @@
                 <p>Fields and values that will be sent:</p>
                 <ul data-action-fields></ul>
                 <p>Inspect the page above. Approving sends this exact request once. Reject it if the destination, content, or effect is unclear. Payments, purchases, transfers, and card information are blocked even if approved.</p>
-                <button type="button" data-action-decision="approve">Approve this action</button>
-                <button type="button" data-action-decision="deny">Reject this action</button>
+                <button class="sh-button sh-button-secondary" type="button" data-action-decision="approve">Approve this action</button>
+                <button class="sh-button sh-button-secondary" type="button" data-action-decision="deny">Reject this action</button>
               </section>
               <p>Click the page to control it. Every non-login form submission pauses for your review. Typed text stays only in this live session. Payments, purchases, transfers, card information, and unclear forms are blocked.</p>
             {% else %}
-              <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
-                {% csrf_token %}<button name="decision" value="take_control">Take control to sign in</button>
+              <form class="sh-stack" method="post" action="{% url 'browser-task-decision' job.job_id %}">
+                {% csrf_token %}<button class="sh-button sh-button-primary" name="decision" value="take_control">Take control to sign in</button>
               </form>
             {% endif %}
           </section>
@@ -101,8 +101,8 @@
         </aside>
       </div>
     {% endif %}
-    <form method="post" action="{% url 'browser-task-decision' job.job_id %}">
-      {% if not browser_session_active %}{% csrf_token %}<button name="decision" value="cancel">Stop this browser task</button>{% endif %}
+    <form class="sh-stack" method="post" action="{% url 'browser-task-decision' job.job_id %}">
+      {% if not browser_session_active %}{% csrf_token %}<button class="sh-button sh-button-primary" name="decision" value="cancel">Stop this browser task</button>{% endif %}
     </form>
   {% endif %}
   {% if job.lifecycle == 'cancelled' and not outcome %}<p role="status">Account deactivation requested cancellation. Waiting for the worker to confirm that execution has stopped.</p>
@@ -136,10 +136,10 @@
       <p>Destination (JSON escaped): <code>{{ action.display_url }}</code></p>
       <p>Headers (JSON escaped):</p><pre>{{ action.display_headers }}</pre>
       <p>Data (JSON escaped):</p><pre>{{ action.display_body }}</pre>
-      <form method="post" action="{% url 'skill-network-decision' job.job_id action.id %}">
+      <form class="sh-stack" method="post" action="{% url 'skill-network-decision' job.job_id action.id %}">
         {% csrf_token %}<input type="hidden" name="digest" value="{{ action.digest }}">
-        <button name="decision" value="approve">Approve this request</button>
-        <button name="decision" value="deny">Deny</button>
+        <button class="sh-button sh-button-primary" name="decision" value="approve">Approve this request</button>
+        <button class="sh-button sh-button-primary" name="decision" value="deny">Deny</button>
       </form>
     </section>
   {% endfor %}

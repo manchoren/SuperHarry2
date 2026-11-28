@@ -1,17 +1,17 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Input #{{ item.pk }}{% endblock %}
-{% block content %}
+{% block ui_content %}
 {% include 'includes/folder_tabs.html' with active_folder_tab='inputs' %}
-<nav aria-label="Breadcrumb"><a href="{% url 'inputs' %}">Chat inputs</a></nav>
-<h1>Input #{{ item.pk }}</h1>
-<dl class="file-detail-list">
+<nav class="sh-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'inputs' %}">Chat inputs</a></nav>
+<header class="sh-heading"><h1>Input #{{ item.pk }}</h1></header>
+<dl class="sh-facts sh-card input-facts">
   <dt>Name</dt><dd>{{ item.name }}</dd>
   <dt>Type</dt><dd>{{ item.media_type }}</dd>
-  <dt>Uploaded</dt><dd>{% if item.created_at %}{{ item.created_at }}{% else %}Date unavailable{% endif %}</dd>
+  <dt>Uploaded</dt><dd>{% if item.created_at %}<time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at }}</time>{% else %}Date unavailable{% endif %}</dd>
   <dt>Conversation</dt><dd>{% if item.message_id and item.message.conversation_id %}<a href="{% url 'chat-history' item.message.conversation_id %}">{{ item.message.conversation.title }}</a>{% else %}Not attached to a conversation{% endif %}</dd>
 </dl>
-<div class="listing-detail-actions">
-  <a class="listing-action" href="{% url 'input-download' item.pk %}">Download {{ item.name }}</a>
-  <form method="post" action="{% url 'input-delete' item.pk %}">{% csrf_token %}<button class="listing-action listing-danger-action" type="submit">Delete</button></form>
+<div class="sh-actions input-detail-actions">
+  <a class="sh-button sh-button-secondary" href="{% url 'input-download' item.pk %}">Download {{ item.name }}</a>
+  <form method="post" action="{% url 'input-delete' item.pk %}">{% csrf_token %}<button class="sh-button sh-button-danger" type="submit">Delete</button></form>
 </div>
 {% endblock %}

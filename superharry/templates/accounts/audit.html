@@ -1,24 +1,16 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Account audit{% endblock %}
-{% block content %}
-<header class="listing-header">
-  <div>
-    <h1>Account audit</h1>
-    <p class="muted">Account-management actions only. This history does not include passwords or private account content.</p>
+{% block ui_content %}
+<header class="sh-heading">
+  <div class="sh-stack">
+    <a class="sh-button sh-button-quiet" href="{% url 'account-list' %}">Accounts</a>
+    <div><h1>Account audit</h1><p class="sh-muted">Account-management actions only. This history does not include passwords or private account content.</p></div>
   </div>
 </header>
 
-<div class="listing-table-scroll" role="region" aria-label="Account audit events" tabindex="0">
-  <table class="listing-table">
-    <thead>
-      <tr>
-        <th scope="col">Actor</th>
-        <th scope="col">Target</th>
-        <th scope="col">Target role</th>
-        <th scope="col">Action</th>
-        <th scope="col">Time</th>
-      </tr>
-    </thead>
+<div class="sh-table-region" role="region" aria-label="Account audit events" tabindex="0">
+  <table class="sh-table">
+    <thead><tr><th scope="col">Actor</th><th scope="col">Target</th><th scope="col">Target role</th><th scope="col">Action</th><th scope="col">Time</th></tr></thead>
     <tbody>
       {% for event in events %}
         <tr>
@@ -29,17 +21,17 @@
           <td data-label="Time"><time datetime="{{ event.occurred_at|date:'c' }}">{{ event.occurred_at|date:"Y-m-d H:i" }}</time></td>
         </tr>
       {% empty %}
-        <tr><td class="listing-empty" colspan="5">No account events are available.</td></tr>
+        <tr><td colspan="5"><div class="sh-empty"><strong>No account events are available.</strong><p>Account management events will appear here.</p></div></td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
 {% if page.paginator.num_pages > 1 %}
-  <nav class="listing-pagination" aria-label="Account audit pages">
-    {% if page.has_previous %}<a class="listing-action" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+  <nav class="sh-actions" aria-label="Account audit pages">
+    {% if page.has_previous %}<a class="sh-button sh-button-secondary" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
     <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
-    {% if page.has_next %}<a class="listing-action" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+    {% if page.has_next %}<a class="sh-button sh-button-secondary" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
   </nav>
 {% endif %}
 {% endblock %}

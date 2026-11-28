@@ -1,24 +1,21 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Account {{ operation }}{% endblock %}
-{% block content %}
-<header class="listing-header">
-  <div>
-    <h1>Account {{ operation }}</h1>
-    <p class="muted"><a href="{% url 'account-detail' account.pk %}">{{ account.username }}</a></p>
-  </div>
-</header>
-{% if operation == 'deactivated' %}
-  <p role="status">The account is inactive. New sign-ins and work are blocked.</p>
-  {% if pending.total %}
-    <p role="status">Cancellation has been requested for {{ pending.total }} ongoing task(s). The application will report them stopped only after each worker or response confirms it.</p>
+{% block ui_content %}
+<header class="sh-heading"><div><h1>Account {{ operation }}</h1><p class="sh-muted"><a href="{% url 'account-detail' account.pk %}">{{ account.username }}</a></p></div></header>
+<div class="sh-card sh-stack">
+  {% if operation == 'deactivated' %}
+    <p class="sh-notice" role="status">The account is inactive. New sign-ins and work are blocked.</p>
+    {% if pending.total %}
+      <p class="sh-notice" role="status">Cancellation has been requested for {{ pending.total }} ongoing task(s). The application will report them stopped only after each worker or response confirms it.</p>
+    {% else %}
+      <p class="sh-notice" role="status">All tracked ongoing work has confirmed it stopped. Completed external actions were not undone.</p>
+    {% endif %}
+    <p>{{ schedule_count }} schedule(s) were paused with their next due times preserved.</p>
   {% else %}
-    <p role="status">All tracked ongoing work has confirmed it stopped. Completed external actions were not undone.</p>
+    <p class="sh-notice" role="status">The account is active again. Occurrences due while it was inactive were skipped, and future schedules were resumed.</p>
+    {% if pending.total %}<p class="sh-notice" role="status">Some earlier stop requests still await confirmation from their worker or response.</p>{% endif %}
+    <p>{{ schedule_count }} schedule(s) were resumed.</p>
   {% endif %}
-  <p>{{ schedule_count }} schedule(s) were paused with their next due times preserved.</p>
-{% else %}
-  <p role="status">The account is active again. Occurrences due while it was inactive were skipped, and future schedules were resumed.</p>
-  {% if pending.total %}<p role="status">Some earlier stop requests still await confirmation from their worker or response.</p>{% endif %}
-  <p>{{ schedule_count }} schedule(s) were resumed.</p>
-{% endif %}
-<p><a class="listing-action" href="{% url 'account-detail' account.pk %}">Back to account details</a></p>
+  <div class="sh-actions"><a class="sh-button sh-button-secondary" href="{% url 'account-detail' account.pk %}">Back to account details</a></div>
+</div>
 {% endblock %}

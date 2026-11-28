@@ -12,6 +12,9 @@ from django.test import Client, TransactionTestCase
 
 class BrowserSessionPanelTests(TransactionTestCase):
     def setUp(self):
+        from superharry.models import ChatLimits
+
+        ChatLimits.objects.get_or_create(pk=1)
         self.owner = get_user_model().objects.create_user(username="browser-owner", password="test")
         self.other = get_user_model().objects.create_user(username="browser-other", password="test")
         self.job_id = uuid4()

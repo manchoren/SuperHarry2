@@ -11,7 +11,11 @@ from django.test import TransactionTestCase, override_settings
 
 
 class SkillCatalogTests(TransactionTestCase):
-    serialized_rollback = True
+    def setUp(self):
+        from superharry.models import ChatLimits
+
+        ChatLimits.objects.get_or_create(pk=1)
+        Group.objects.get_or_create(name="Administrators")
 
     def test_deleting_skill_stops_pending_run_and_notifies_its_owner(self):
         from scripts.run_skill_jobs import process_queue

@@ -1,24 +1,26 @@
-{% load static %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in · SuperHarry2</title>
-  <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
-  <script src="{% static 'superharry/theme.js' %}"></script>
-</head>
-<body class="login-page">
-  <main class="login-card">
-    <div class="login-brand"><span class="brand-mark" aria-hidden="true">S</span> SuperHarry</div>
-    <h1>Sign in</h1>
-    <form method="post">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <input type="hidden" name="next" value="{{ next }}">
-      <button type="submit">Sign in</button>
-    </form>
-    {% include 'includes/theme.html' %}
-  </main>
-</body>
-</html>
+{% extends 'registration/base.html' %}
+{% block title %}Sign in · SuperHarry2{% endblock %}
+{% block content %}
+<section class="sh-card sh-stack auth-card" aria-labelledby="auth-heading">
+  <a class="auth-brand" href="{% url 'login' %}"><span class="sh-monogram" aria-hidden="true">S</span>SuperHarry</a>
+  <header class="auth-heading">
+    <h1 id="auth-heading">Sign in</h1>
+    <p class="sh-muted">Use your SuperHarry account to continue.</p>
+  </header>
+  <form class="auth-form" method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="sh-notice sh-notice-error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    <label class="sh-field" for="{{ form.username.id_for_label }}">{{ form.username.label }}:
+      {{ form.username }}
+      {% if form.username.errors %}<span class="auth-errors" role="alert">{{ form.username.errors }}</span>{% endif %}
+    </label>
+    <label class="sh-field" for="{{ form.password.id_for_label }}">{{ form.password.label }}:
+      {{ form.password }}
+      {% if form.password.errors %}<span class="auth-errors" role="alert">{{ form.password.errors }}</span>{% endif %}
+    </label>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="sh-button sh-button-primary auth-submit" type="submit">Sign in</button>
+  </form>
+  <div class="auth-appearance">{% include 'includes/theme.html' %}</div>
+</section>
+{% endblock %}

@@ -1,0 +1,4 @@
+{% extends 'ui/base.html' %}
+{% load static %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'superharry/skills.css' %}">{% endblock %}
+{% block ui_content %}<div class="skill-page">{% block skill_content %}{% endblock %}</div>{% endblock %}

@@ -87,13 +87,18 @@ pre { overflow-x: auto; }
 /* Persistent icon rail and independently collapsible conversation list. */
 .app-shell { display: grid; grid-template-columns: 3.75rem 17rem minmax(0, 1fr); }
 .app-shell.sidebar-closed { grid-template-columns: 3.75rem minmax(0, 1fr); }
+.app-shell:not(.chat-page) { grid-template-columns: 3.75rem minmax(0, 1fr); }
+.app-shell.chat-page { grid-template-columns: 3.75rem 17rem minmax(0, 1fr); }
+.app-shell.chat-page.sidebar-closed { grid-template-columns: 3.75rem minmax(0, 1fr); }
 .icon-rail { position: sticky; top: 0; height: 100vh; padding: .45rem .3rem; background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; z-index: 5; }
 .rail-nav, .sidebar-footer { display: flex; flex-direction: column; align-items: center; gap: .25rem; }
 .sidebar-footer { margin-top: auto; }
 .sidebar-footer form { margin: 0; }
 .rail-button, .sidebar-icon { width: 2.75rem; height: 2.75rem; min-height: 2.75rem; display: inline-grid; place-items: center; padding: .6rem; border: 0; border-radius: .7rem; color: var(--text); background: transparent; cursor: pointer; }
 .rail-button:hover, .sidebar-icon:hover, .new-chat-link:hover { color: var(--text); background: var(--accent-soft); }
+.rail-button[aria-current="page"] { color: var(--accent); background: var(--accent-soft); }
 .rail-button svg, .sidebar-icon svg, .new-chat-link svg, .composer-options svg, .theme-slider-row svg { width: 1.15rem; height: 1.15rem; fill: currentColor; }
+.account-management-link svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .menu-toggle { display: inline-grid; margin: 0; position: static; }
 .appearance-popover { position: relative; }
 .appearance-popover summary { list-style: none; }
@@ -160,10 +165,32 @@ pre { overflow-x: auto; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) .skill-mention.is-unavailable { color: #ffb4aa; } }
 .chat-page:has(.file-preview:not([hidden])) { grid-template-columns: 3.75rem 17rem minmax(0, 1fr) minmax(18rem, 35vw); }
 .chat-page.sidebar-closed:has(.file-preview:not([hidden])) { grid-template-columns: 3.75rem minmax(0, 1fr) minmax(18rem, 35vw); }
+.chat-page .main-content { width: min(100%, 58rem); margin-inline: auto; }
+.chat-page .chat-heading { align-items: center; margin-bottom: 1rem; }
+.chat-page .chat-heading h1 { min-width: 0; overflow-wrap: anywhere; font-size: clamp(1.4rem, 2.5vw, 2rem); }
+.chat-page .chat-heading .sh-button { flex: none; }
+.chat-scheduled-tasks { display: grid; gap: .65rem; margin-bottom: 1rem; }
+.chat-scheduled-tasks:empty { display: none; }
+.chat-scheduled-tasks .sh-card { max-width: 65ch; }
+.chat-page #messages { min-width: 0; }
+.chat-page #messages > article { border: 0; padding: .15rem .65rem; background: transparent; }
+.chat-page #messages > .sh-message-user { border: 0; padding: .65rem .8rem; border-radius: var(--sh-radius); background: var(--sh-panel); }
+.chat-page #messages .message-header { justify-content: flex-start; }
+.chat-page #composer { border-color: var(--sh-control-line); border-radius: .85rem; box-shadow: none; }
+.chat-page #composer .sh-composer-toolbar { align-items: center; }
+.chat-page #composer .sh-send { margin-inline-start: auto; }
+.chat-page #composer .composer-model { margin-inline-start: 0; }
+.chat-page #composer .composer-model[aria-label="Active model"] { margin-inline-end: auto; }
+.chat-page .composer-options .sh-disclosure > summary { border: 0; }
+.chat-page .composer-options .sh-disclosure > summary:is(:hover, :focus-visible) { background: var(--sh-selected); }
+.chat-page #chat-status:empty { display: none; }
+.chat-page .file-preview { position: fixed; z-index: 10; top: 0; right: 0; width: min(35vw, 28rem); height: 100vh; overflow: auto; padding: 1rem; background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--shadow); }
+.chat-page .file-preview[hidden] { display: none; }
 @media (max-width: 50rem) {
   .app-shell, .app-shell.sidebar-closed, .chat-page:has(.file-preview:not([hidden])), .chat-page.sidebar-closed:has(.file-preview:not([hidden])) { display: grid; grid-template-columns: 3.75rem minmax(0, 1fr); }
   .sidebar { display: flex; position: fixed; z-index: 4; left: 3.75rem; top: 0; width: min(17rem, calc(100vw - 3.75rem)); height: 100vh; max-height: none; border-right: 1px solid var(--line); box-shadow: var(--shadow); }
   .sidebar-closed .sidebar { display: none; }
   .main-content { padding: 1.5rem 1rem 3rem; }
   .file-preview { position: fixed; z-index: 10; inset: 0 0 0 3.75rem; width: calc(100% - 3.75rem); }
+  .chat-page .file-preview { inset: 0 0 0 3.75rem; width: calc(100% - 3.75rem); }
 }

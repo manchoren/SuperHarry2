@@ -1,0 +1,26 @@
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1rem;
+}
+
+.auth-main { width: min(100%, 29rem); }
+.auth-card { gap: 1.1rem; padding: clamp(1.25rem, 5vw, 2rem); }
+.auth-brand { display: inline-flex; width: fit-content; align-items: center; gap: .65rem; color: var(--sh-text); font-weight: 750; text-decoration: none; }
+.auth-heading { display: grid; gap: .35rem; }
+.auth-heading h1 { font-size: clamp(1.7rem, 5vw, 2.2rem); line-height: 1.15; letter-spacing: -.03em; }
+.auth-heading p { max-width: 42ch; }
+.auth-form { display: grid; gap: 1rem; margin: 0; }
+.auth-submit { justify-self: start; min-width: 8rem; }
+.auth-errors { color: var(--sh-danger); font-size: .875rem; font-weight: 500; }
+.auth-errors ul { margin: 0; padding-inline-start: 1.2rem; }
+.auth-actions { margin: 0; }
+.auth-appearance { padding-top: .9rem; border-top: 1px solid var(--sh-line); }
+.auth-appearance .theme-control { color: var(--sh-text); }
+
+@media (max-width: 30rem) {
+  .auth-page { padding: .65rem; }
+  .auth-card { gap: .9rem; }
+  .auth-submit { width: 100%; }
+}

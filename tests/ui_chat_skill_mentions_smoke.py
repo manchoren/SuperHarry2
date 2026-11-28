@@ -141,7 +141,7 @@ try:
         assert "Context unknown" in page.locator(".context-doughnut").inner_text()
         page.locator("#compact-context").click()
         page.get_by_text("There are not enough older messages to compact.").wait_for(state="visible")
-        assert page.locator("#composer a", has_text="Conversation files").is_visible()
+        assert page.get_by_role("link", name="Conversation files").is_visible()
         assert page.locator("#messages").get_by_text(
             "Please use /summarize and /not-ready, then /summarize again.", exact=True
         ).is_visible()

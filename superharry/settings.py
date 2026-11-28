@@ -9,6 +9,7 @@ SECRET_KEY = (
     if secret_file
     else os.environ.get("DJANGO_SECRET_KEY", "")
 )
+UI_COMPONENT_CATALOG_ENABLED = os.environ.get("UI_COMPONENT_CATALOG_ENABLED", "0").lower() in {"1", "true", "yes"}
 if not SECRET_KEY:
     raise ImproperlyConfigured("Set a nonempty Django signing key.")
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]

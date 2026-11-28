@@ -1,5 +1,6 @@
 """Exercise account settings in a real browser using isolated synthetic data."""
 import os
+import sys
 import tempfile
 import threading
 from io import BytesIO
@@ -9,6 +10,7 @@ from wsgiref.simple_server import make_server
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 with tempfile.TemporaryDirectory(prefix="superharry-profile-") as directory:
     os.environ.update(DJANGO_SETTINGS_MODULE="superharry.settings", DJANGO_SECRET_KEY="synthetic-test", DJANGO_DATABASE_PATH=str(Path(directory) / "db.sqlite3"))
     import django
@@ -49,6 +51,9 @@ with tempfile.TemporaryDirectory(prefix="superharry-profile-") as directory:
             assert page.evaluate("document.activeElement.textContent") == "Update image"
             output = BytesIO()
             Image.new("RGB", (500, 300), "blue").save(output, "PNG")
+            page.locator("#avatar").set_input_files({"name": "invalid.txt", "mimeType": "text/plain", "buffer": b"not an image"})
+            page.get_by_role("button", name="Update image").click()
+            assert page.get_by_role("alert").is_visible()
             page.locator("#avatar").set_input_files({"name": "image.png", "mimeType": "image/png", "buffer": output.getvalue()})
             assert page.locator("#selected-avatar-preview").is_visible()
             assert page.locator("#avatar-initial").is_hidden()
@@ -89,6 +94,11 @@ with tempfile.TemporaryDirectory(prefix="superharry-profile-") as directory:
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
             page.get_by_role("button", name="Remove image").click()
             assert page.locator(".sidebar-footer .avatar-initial").is_visible()
+            password_fields[0].fill("wrong-password")
+            password_fields[1].fill("new-synthetic-password-68")
+            password_fields[2].fill("new-synthetic-password-68")
+            page.get_by_role("button", name="Change password").click()
+            assert page.get_by_role("alert").is_visible()
             password_fields[0].fill("synthetic-password-32")
             password_fields[1].fill("new-synthetic-password-68")
             password_fields[2].fill("new-synthetic-password-68")

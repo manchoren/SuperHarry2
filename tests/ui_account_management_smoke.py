@@ -11,6 +11,7 @@ os.environ.update(
     DJANGO_SETTINGS_MODULE="superharry.settings",
     DJANGO_SECRET_KEY="synthetic-account-admin-test",
     DJANGO_DATABASE_PATH=str(Path(temporary_directory.name) / "accounts.sqlite3"),
+    UI_COMPONENT_CATALOG_ENABLED="1",
 )
 
 import django
@@ -23,10 +24,12 @@ from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.core.wsgi import get_wsgi_application
 from django.db import connections
+from django.conf import settings
 from playwright.sync_api import sync_playwright
 from superharry.models import AccountAudit
 
 call_command("migrate", verbosity=0)
+settings.UI_COMPONENT_CATALOG_ENABLED = True
 administrators, _ = Group.objects.get_or_create(name="Administrators")
 manager = get_user_model().objects.create_user(
     username="browser-manager", password="synthetic-browser-manager-password", is_staff=True
@@ -74,20 +77,70 @@ def serve():
 thread = threading.Thread(target=serve, daemon=True)
 thread.start()
 base = f"http://127.0.0.1:{server.server_port}"
+
+
+def choose_theme(page, mode):
+    slider = page.locator("[data-theme-select]")
+    if not slider.is_visible():
+        page.locator(".appearance-popover summary").click()
+    slider.evaluate(
+        "(element, value) => { element.value = value; element.dispatchEvent(new Event('input', {bubbles: true})); }",
+        {"light": "0", "system": "1", "dark": "2"}[mode],
+    )
+
+
 try:
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(executable_path=os.environ["UI_BROWSER_PATH"], headless=True)
+        browser_path = os.environ.get("UI_BROWSER_PATH") or playwright.chromium.executable_path
+        browser = playwright.chromium.launch(executable_path=browser_path, headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.set_default_timeout(5000)
+        page.emulate_media(color_scheme="light", reduced_motion="reduce")
         page.goto(base + "/login/")
+        choose_theme(page, "dark")
         page.get_by_label("Username:").fill("browser-manager")
         page.get_by_label("Password:").fill("synthetic-browser-manager-password")
         page.get_by_role("button", name="Sign in").click()
-        page.get_by_role("link", name="Accounts").click()
+        page.goto(base + "/dev/ui-components/")
+        assert page.get_by_role("heading", name="Component library").is_visible()
+        assert page.get_by_text("alex@example.com").is_visible()
+        assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
+        page.locator(".catalog-theme label").filter(has_text="Dark").click()
+        assert page.locator("body.sh").evaluate("element => getComputedStyle(element).colorScheme") == "dark"
+        page.locator(".catalog-theme label").filter(has_text="Light").click()
+        assert page.locator("body.sh").evaluate("element => getComputedStyle(element).colorScheme") == "light"
+        page.locator(".catalog-theme label").filter(has_text="System").click()
+        page.add_script_tag(path=os.environ["UI_AXE_PATH"])
+        catalog_violations = page.evaluate("async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => v.id)")
+        assert not catalog_violations, ("catalog", catalog_violations)
+        page.goto(base + "/accounts/")
 
         assert page.get_by_role("heading", name="Accounts").is_visible()
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+        assert page.locator(".sh-heading").get_by_role("link", name="Account audit").is_visible()
+        choose_theme(page, "system")
+        assert page.evaluate("document.documentElement.dataset.theme") == "light"
+        page.emulate_media(color_scheme="dark")
+        page.wait_for_function("document.documentElement.dataset.theme === 'dark'")
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+        page.emulate_media(color_scheme="light")
+        page.wait_for_function("document.documentElement.dataset.theme === 'light'")
+        assert page.evaluate("document.documentElement.dataset.theme") == "light"
+        choose_theme(page, "dark")
+        page.reload()
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+        main_navigation = page.get_by_role("navigation", name="Main navigation")
+        assert main_navigation.get_by_role("link", name="Accounts").get_attribute("aria-current") == "page"
         assert page.get_by_role("link", name="Create regular account").is_visible()
         assert page.get_by_text("browser-regular").is_visible()
         assert page.get_by_text("hidden-privileged").count() == 0
+        page.goto(base + "/accounts/audit/")
+        assert page.get_by_text("No account events are available.").is_visible()
+        page.goto(base + "/accounts/")
+        page.get_by_label("Status").focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.activeElement.matches(':focus-visible')")
+        assert page.evaluate("parseFloat(getComputedStyle(document.activeElement).outlineWidth) >= 2")
         page.get_by_label("Username or email").fill("")
         page.get_by_label("Status").select_option("active")
         page.get_by_label("Role").select_option("regular")
@@ -95,6 +148,11 @@ try:
         assert page.get_by_label("Username or email").input_value() == ""
         assert page.get_by_text("browser-regular", exact=True).count() == 1
         assert page.get_by_text("browser-inactive", exact=True).count() == 0
+        page.get_by_label("Username or email").fill("no-account-matches-this")
+        page.get_by_role("button", name="Apply filters").click()
+        assert page.locator(".sh-empty").is_visible()
+        page.goto(base + "/accounts/")
+        page.get_by_label("Role").select_option("regular")
         page.get_by_label("Status").select_option("inactive")
         page.get_by_role("button", name="Apply filters").click()
         assert page.get_by_text("browser-inactive", exact=True).count() == 1
@@ -108,6 +166,9 @@ try:
         assert page.get_by_text("browser-regular").is_visible()
         assert page.get_by_text("browser-inactive").count() == 0
         assert page.get_by_text("hidden-privileged").count() == 0
+        page.add_script_tag(path=os.environ["UI_AXE_PATH"])
+        account_violations = page.evaluate("async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => v.id)")
+        assert not account_violations, ("accounts", account_violations)
 
         page.get_by_role("button", name="Sign out").click()
         page.get_by_label("Username:").fill("browser-owner")
@@ -123,7 +184,22 @@ try:
         page.get_by_label("Username:").fill("browser-manager")
         page.get_by_label("Password:").fill("synthetic-browser-manager-password")
         page.get_by_role("button", name="Sign in").click()
-        page.get_by_role("link", name="Accounts").click()
+        page.goto(base + "/accounts/")
+
+        page.get_by_role("button", name="Sign out").click()
+        page.get_by_label("Username:").fill("browser-regular")
+        page.get_by_label("Password:").fill("synthetic-browser-regular-password")
+        page.get_by_role("button", name="Sign in").click()
+        audit_denied = page.goto(base + "/accounts/audit/")
+        assert audit_denied.status == 403
+        accounts_denied = page.goto(base + "/accounts/")
+        assert accounts_denied.status == 403
+
+        page.goto(base + "/login/")
+        page.get_by_label("Username:").fill("browser-manager")
+        page.get_by_label("Password:").fill("synthetic-browser-manager-password")
+        page.get_by_role("button", name="Sign in").click()
+        page.goto(base + "/accounts/")
 
         create_account = page.get_by_role("link", name="Create regular account")
         create_account.focus()
@@ -132,6 +208,13 @@ try:
         heading = page.locator("h1")
         heading.wait_for()
         assert heading.inner_text() == "Create a regular account"
+        page.get_by_label("Username", exact=True).focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.activeElement.matches(':focus-visible')")
+        page.get_by_label("Username", exact=True).fill("browser-regular")
+        page.get_by_label("Initial password").fill("synthetic-browser-duplicate-password")
+        page.get_by_role("button", name="Create account").click()
+        assert page.get_by_role("alert").is_visible()
         page.get_by_label("Username", exact=True).fill("created-in-browser")
         page.get_by_label("Initial password").fill("synthetic-browser-created-account-password")
         required_change = page.get_by_label("Require a password change at first sign-in")
@@ -177,6 +260,7 @@ try:
         assert page.get_by_role("table").is_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert page.get_by_role("link", name="Accounts").is_visible()
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
         page.get_by_text("browser-regular", exact=True).first.click()
         assert page.get_by_role("heading", name="Account details").is_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
@@ -184,10 +268,21 @@ try:
         page.set_viewport_size({"width": 1440, "height": 900})
         page.goto(base + "/accounts/audit/")
         assert page.get_by_role("heading", name="Account audit").is_visible()
+        main_navigation = page.get_by_role("navigation", name="Main navigation")
+        assert main_navigation.get_by_role("link", name="Accounts").get_attribute("aria-current") == "page"
+        assert page.get_by_role("link", name="Account audit").count() == 0
+        assert page.get_by_role("link", name="Settings", exact=True).get_attribute("aria-current") is None
         assert page.get_by_role("table").is_visible()
         assert page.get_by_role("columnheader", name="Target role").is_visible()
         assert page.get_by_role("columnheader", name="Action").is_visible()
         assert page.get_by_text("hidden-privileged", exact=True).count() == 0
+        choose_theme(page, "light")
+        assert page.evaluate("document.documentElement.dataset.theme") == "light"
+        page.add_script_tag(path=os.environ["UI_AXE_PATH"])
+        audit_violations = page.evaluate("async () => (await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}})).violations.map(v => v.id)")
+        assert not audit_violations, ("account audit", audit_violations)
+        choose_theme(page, "dark")
+        assert page.evaluate("document.documentElement.dataset.theme") == "dark"
 
         page.set_viewport_size({"width": 375, "height": 812})
         page.goto(base + "/accounts/audit/")
@@ -205,6 +300,12 @@ try:
         assert page.get_by_role("heading", name="Delete account permanently").is_visible()
         assert page.get_by_text("owned local skill(s)", exact=False).is_visible()
         assert page.get_by_text("other users", exact=False).is_visible()
+        page.locator("#id_confirmation").focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.activeElement.matches(':focus-visible')")
+        page.locator("#id_confirmation").fill("incorrect-name")
+        page.get_by_role("button", name="Delete account and owned data").click()
+        assert page.get_by_role("alert").is_visible()
         page.locator("#id_confirmation").fill("created-in-browser")
         page.get_by_role("button", name="Delete account and owned data").click()
         page.wait_for_url(f"{base}/accounts/")

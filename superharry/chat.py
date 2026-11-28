@@ -592,6 +592,8 @@ def schedule_model(request, schedule_id):
         return HttpResponse("The model catalog is unavailable.", status=503)
     schedule.preferred_model = model
     schedule.save(update_fields=("preferred_model",))
+    if request.POST.get("return_to") == "detail":
+        return redirect("schedule-detail", schedule_id=schedule.pk)
     return redirect("schedules")
 
 
@@ -601,6 +603,8 @@ def schedule_model(request, schedule_id):
 def cancel_schedule(request, schedule_id):
     schedule = get_object_or_404(Schedule, pk=schedule_id, owner=request.user, conversation__owner=request.user)
     Schedule.objects.filter(pk=schedule.pk, owner=request.user).update(canceled=True, next_run=None)
+    if request.POST.get("return_to") == "detail":
+        return redirect("schedule-detail", schedule_id=schedule.pk)
     if request.POST.get("return_to") == "menu":
         return redirect("schedules")
     return redirect("chat-history", conversation_id=schedule.conversation_id)
@@ -1231,6 +1235,13 @@ def send(request, conversation_id=None):
         if conversation_id is not None
         else None
     )
+    text = request.POST.get("message", "").strip()
+    if not text:
+        return JsonResponse({"error": "Enter a message."}, status=400)
+    try:
+        text_skill(text)
+    except ValueError as failure:
+        return JsonResponse({"error": str(failure)}, status=400)
     model_selection = conversation.preferred_model if conversation else request.POST.get("model", "auto")
     try:
         route_catalog = available_route_catalog()
@@ -1248,9 +1259,6 @@ def send(request, conversation_id=None):
     reasoning_effort = request.POST.get("reasoning_effort", conversation.reasoning_effort if conversation else "none")
     if reasoning_effort not in {"none", *efforts}:
         return JsonResponse({"error": "This model does not support that reasoning level."}, status=400)
-    text = request.POST.get("message", "").strip()
-    if not text:
-        return JsonResponse({"error": "Enter a message."}, status=400)
     selected_name = request.POST.get("selected_skill", "")
     selected_skill = next((item for item in available_chat_skills() if item["name"] == selected_name), None) if selected_name else None
     if selected_name and not selected_skill:

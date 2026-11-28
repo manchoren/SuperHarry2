@@ -1,13 +1,14 @@
-{% extends "memories/base.html" %}
+{% extends 'ui/base.html' %}
 {% block title %}Previous CSV results{% endblock %}
-{% block content %}
-  <h1>Previous CSV results</h1>
-  {% if files %}
-    <h2>Your CSV files</h2>
-    <ul>
-      {% for record in files %}
-        <li>File #{{ record.pk }}: <a href="{% url 'csv-detail' record.pk %}">{{ record.name }}</a></li>
-      {% endfor %}
-    </ul>
-  {% endif %}
+{% block ui_content %}
+<header class="sh-heading"><div><h1>Previous CSV results</h1><p class="sh-muted">Summaries are visible only to the account that uploaded each file.</p></div></header>
+{% if files %}
+  <div class="sh-table-region" role="region" aria-label="Previous CSV results" tabindex="0">
+    <table class="sh-table"><thead><tr><th scope="col">File</th><th scope="col">Result</th></tr></thead><tbody>
+      {% for record in files %}<tr><th scope="row" data-label="File">{{ record.name }}</th><td data-label="Result"><a class="sh-button sh-button-secondary" href="{% url 'csv-detail' record.pk %}">View summary</a></td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+{% else %}
+  <div class="sh-empty"><strong>No previous CSV results</strong><p>Completed summaries for your files will appear here.</p></div>
+{% endif %}
 {% endblock %}

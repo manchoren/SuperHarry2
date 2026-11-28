@@ -1,29 +1,9 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}{{ item.name }}{% endblock %}
-{% block content %}
+{% block ui_content %}
 {% include 'includes/folder_tabs.html' with active_folder_tab='files' %}
-<nav aria-label="Breadcrumb">
-  {% if kind == 'input' and not is_admin %}<a href="{% url 'inputs' %}">Chat inputs</a>{% else %}<a href="{% url 'file-history' %}">File history</a>{% endif %}
-</nav>
-<h1>{{ item.name }}</h1>
-<dl class="memory-detail file-detail-list">
-  <dt>Type</dt><dd>{% if kind == 'input' %}Uploaded input{% else %}Generated file{% endif %}</dd>
-  {% if is_admin %}<dt>Owner</dt><dd>{{ owner.username }}</dd>{% endif %}
-  <dt>File ID</dt><dd>{{ item.pk }}</dd>
-  {% if kind == 'input' %}
-    <dt>Media type</dt><dd>{{ item.media_type }}</dd>
-    <dt>Uploaded</dt><dd>{% if item.created_at %}<time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at }}</time>{% else %}Date unavailable{% endif %}</dd>
-  {% else %}
-    <dt>Skill</dt><dd>{{ item.run.skill_name }}</dd>
-    <dt>Version group</dt><dd>{{ item.group.name|default:"No group" }}</dd>
-    <dt>Updated</dt><dd>{% if item.updated_at %}<time datetime="{{ item.updated_at|date:'c' }}">{{ item.updated_at }}</time>{% else %}Date unavailable{% endif %}</dd>
-    <dt>Result</dt><dd>{% if item.partial %}Partial result{% else %}Complete{% endif %}</dd>
-  {% endif %}
-  <dt>Conversation</dt><dd>{% if conversation %}{% if owner.pk == user.pk %}<a href="{% url 'chat-history' conversation.pk %}">{{ conversation.title }}</a>{% else %}{{ conversation.title }}{% endif %}{% else %}Standalone file{% endif %}</dd>
-</dl>
-<div class="listing-detail-actions">
-  <a class="listing-action" href="{% url 'file-history-download' kind item.pk %}">Download {{ item.name }}</a>
-  <a class="listing-action listing-danger-action" href="{% url 'file-delete' %}?kind={{ kind }}&amp;id={{ item.pk }}">Review deletion</a>
-  {% if kind == 'input' and not is_admin %}<a class="listing-action listing-danger-action" href="{% url 'inputs' %}">Back to inputs</a>{% elif kind == 'artifact' and conversation and owner.pk == user.pk %}<a class="listing-action" href="{% url 'conversation-files' conversation.pk %}">Back to conversation files</a>{% endif %}
-</div>
+<nav class="sh-breadcrumb" aria-label="Breadcrumb">{% if kind == 'input' and not is_admin %}<a href="{% url 'inputs' %}">Chat inputs</a>{% else %}<a href="{% url 'file-history' %}">File history</a>{% endif %}</nav>
+<header class="sh-heading"><h1>{{ item.name }}</h1></header>
+<dl class="sh-facts sh-card file-detail-list"><dt>Type</dt><dd>{% if kind == 'input' %}Uploaded input{% else %}Generated file{% endif %}</dd>{% if is_admin %}<dt>Owner</dt><dd>{{ owner.username }}</dd>{% endif %}<dt>File ID</dt><dd>{{ item.pk }}</dd>{% if kind == 'input' %}<dt>Media type</dt><dd>{{ item.media_type }}</dd><dt>Uploaded</dt><dd>{% if item.created_at %}<time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at }}</time>{% else %}Date unavailable{% endif %}</dd>{% else %}<dt>Skill</dt><dd>{{ item.run.skill_name }}</dd><dt>Version group</dt><dd>{{ item.group.name|default:"No group" }}</dd><dt>Updated</dt><dd>{% if item.updated_at %}<time datetime="{{ item.updated_at|date:'c' }}">{{ item.updated_at }}</time>{% else %}Date unavailable{% endif %}</dd><dt>Result</dt><dd>{% if item.partial %}Partial result{% else %}Complete{% endif %}</dd>{% endif %}<dt>Conversation</dt><dd>{% if conversation %}{% if owner.pk == user.pk %}<a href="{% url 'chat-history' conversation.pk %}">{{ conversation.title }}</a>{% else %}{{ conversation.title }}{% endif %}{% else %}Standalone file{% endif %}</dd></dl>
+<div class="sh-actions file-detail-actions"><a class="sh-button sh-button-secondary" href="{% url 'file-history-download' kind item.pk %}">Download {{ item.name }}</a><a class="sh-button sh-button-danger" href="{% url 'file-delete' %}?kind={{ kind }}&amp;id={{ item.pk }}">Review deletion</a>{% if kind == 'input' and not is_admin %}<a class="sh-button sh-button-secondary" href="{% url 'inputs' %}">Back to inputs</a>{% elif kind == 'artifact' and conversation and owner.pk == user.pk %}<a class="sh-button sh-button-secondary" href="{% url 'conversation-files' conversation.pk %}">Back to conversation files</a>{% endif %}</div>
 {% endblock %}

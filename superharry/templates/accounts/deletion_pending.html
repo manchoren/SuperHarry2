@@ -1,17 +1,11 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Account deletion pending{% endblock %}
-{% block content %}
-<header class="listing-header">
-  <div>
-    <h1>Account deletion pending</h1>
-    <p class="muted">{{ account.username }} is inactive. Its data remains in place until every active worker confirms that it stopped.</p>
-  </div>
-</header>
-<p role="status">{{ pending.total }} task(s) are still awaiting confirmation ({{ pending.chat }} response(s), {{ pending.skills }} skill job(s)). The application has not reported the account deleted.</p>
-<form method="post" action="{% url 'account-delete' account.pk %}">
+{% block ui_content %}
+<header class="sh-heading"><div><h1>Account deletion pending</h1><p class="sh-muted">{{ account.username }} is inactive. Its data remains in place until every active worker confirms that it stopped.</p></div></header>
+<p class="sh-notice" role="status">{{ pending.total }} task(s) are still awaiting confirmation ({{ pending.chat }} response(s), {{ pending.skills }} skill job(s)). The application has not reported the account deleted.</p>
+<form class="sh-card sh-stack" method="post" action="{% url 'account-delete' account.pk %}">
   {% csrf_token %}
   <input type="hidden" name="confirmation" value="{{ account.username }}">
-  <button class="listing-danger-action" type="submit">Check again and continue deletion</button>
+  <div class="sh-actions"><button class="sh-button sh-button-danger" type="submit">Check again and continue deletion</button><a class="sh-button sh-button-secondary" href="{% url 'account-detail' account.pk %}">Back to account details</a></div>
 </form>
-<p><a class="listing-action" href="{% url 'account-detail' account.pk %}">Back to account details</a></p>
 {% endblock %}

@@ -1,8 +1,3 @@
-{% extends "memories/base.html" %}
+{% extends 'skills/base.html' %}
 {% block title %}{{ name }}{% endblock %}
-{% block content %}
-  <h1>{{ name }}</h1>
-  <p>Repository skill, read-only.</p>
-  <pre>{{ definition }}</pre>
-  <p><a href="{% url 'skills' %}">All skills</a></p>
-{% endblock %}
+{% block skill_content %}<header class="sh-heading"><div class="sh-stack"><h1>{{ name }}</h1><p class="sh-muted">Repository skill, read-only.</p></div></header><pre>{{ definition }}</pre><a class="sh-button sh-button-secondary" href="{% url 'skills' %}">All skills</a>{% endblock %}

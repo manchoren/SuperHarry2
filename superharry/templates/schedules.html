@@ -1,56 +1,66 @@
-{% extends 'memories/base.html' %}
-{% load tz %}
+{% extends 'ui/base.html' %}
+{% load static tz %}
 {% block title %}Schedules{% endblock %}
-{% block content %}
-<h1>Schedules</h1>
-{% if schedules %}
-  <div class="listing-table-scroll" role="region" aria-label="Scheduled tasks" tabindex="0" style="overflow-x:auto;">
-    <table class="listing-table">
-      <caption>Your scheduled tasks</caption>
-      <thead>
-        <tr>
-          <th scope="col">Task</th>
-          <th scope="col">Prompt</th>
-          <th scope="col">Conversation</th>
-          <th scope="col">Status</th>
-          <th scope="col">Next execution</th>
-          <th scope="col">Latest outcome</th>
-          <th scope="col">Preferred model</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for schedule in schedules %}
-        <tr>
-          <th scope="row" data-label="Task"><a class="listing-detail-link" href="{% url 'schedule-detail' schedule.pk %}">Scheduled task #{{ schedule.pk }}</a>
-            {% if schedule.created_by_id %}<br><small>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</small>{% endif %}
-          </th>
-          <td data-label="Prompt">{{ schedule.prompt|truncatechars:120 }}</td>
-          <td data-label="Conversation"><a href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a></td>
-          <td data-label="Status"><span class="listing-status">{% if schedule.canceled %}Canceled{% elif schedule.running %}Running{% elif schedule.next_run %}Scheduled{% else %}Submitted or finished{% endif %}</span></td>
-          <td data-label="Next execution">{% if schedule.next_run %}{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }}){% else %}—{% endif %}</td>
-          <td data-label="Latest outcome">{% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"None yet" }}{% endif %}</td>
-          <td data-label="Preferred model">{{ schedule.preferred_model|default:"Use active model" }}</td>
-          <td data-label="Actions" class="listing-actions">
-            <a class="listing-detail-link" href="{% url 'schedule-detail' schedule.pk %}">View details</a>
-            {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
-              <form method="post" action="{% url 'schedule-model' schedule.pk %}">
-                {% csrf_token %}<label>Model <select name="model"><option value="">Use active model</option>
-                {% if schedule.preferred_model and schedule.preferred_model not in routes %}<option value="{{ schedule.preferred_model }}" selected disabled>{{ schedule.preferred_model }} (unavailable)</option>{% endif %}
-                {% for route in routes %}<option value="{{ route }}"{% if route == schedule.preferred_model %} selected{% endif %}>{{ route }}</option>{% endfor %}</select></label>
-                <button class="listing-action" type="submit">Save model</button>
-              </form>
-              <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
-                {% csrf_token %}<input type="hidden" name="return_to" value="menu"><button class="listing-action listing-danger-action" type="submit">Cancel schedule</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-{% else %}
-  <p>No schedules yet.</p>
-{% endif %}
+{% block extra_head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'superharry/schedules.css' %}">
+{% endblock %}
+{% block ui_content %}
+  <section class="schedule-page">
+  <header class="sh-heading schedule-page-heading">
+    <div>
+      <h1>Schedules</h1>
+      <p class="sh-muted">Review upcoming work and its latest result.</p>
+    </div>
+  </header>
+  {% if schedules %}
+    <div class="sh-table-region schedule-table-region" role="region" aria-label="Scheduled tasks" tabindex="0">
+      <table class="sh-table schedule-table">
+        <caption class="schedule-caption">Your scheduled tasks</caption>
+        <thead>
+          <tr>
+            <th scope="col">Task</th>
+            <th scope="col">Status</th>
+            <th scope="col">Next execution</th>
+            <th scope="col">Latest result</th>
+            <th scope="col"><span class="sh-sr-only">Details</span></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for schedule in schedules %}
+          <tr>
+            <th scope="row" data-label="Task">
+              <span class="schedule-task-title">Scheduled task #{{ schedule.pk }}</span>
+              <span class="schedule-task-prompt">{{ schedule.prompt|truncatechars:100 }}</span>
+              <a class="schedule-conversation" href="{% url 'chat-history' schedule.conversation_id %}">{{ schedule.conversation.title }}</a>
+              {% if schedule.created_by_id %}<span class="schedule-provenance">Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</span>{% endif %}
+            </th>
+            <td data-label="Status">
+              {% if schedule.canceled %}<span class="sh-status schedule-status">Canceled</span>
+              {% elif schedule.running %}<span class="sh-status sh-status-info schedule-status">Running</span>
+              {% elif schedule.next_run %}<span class="sh-status sh-status-success schedule-status">Scheduled</span>
+              {% else %}<span class="sh-status schedule-status">Submitted or finished</span>{% endif %}
+            </td>
+            <td data-label="Next execution" class="schedule-next-run">
+              {% if schedule.next_run %}{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %}<span>({{ schedule.timezone }})</span>
+              {% else %}<span class="sh-muted">None scheduled</span>{% endif %}
+            </td>
+            <td data-label="Latest result" class="schedule-outcome">
+              {% if schedule.latest_outcome == "needs_user_input" %}Needs user input{% else %}{{ schedule.latest_outcome|default:"No result yet" }}{% endif %}
+            </td>
+            <td data-label="Details" class="schedule-detail-cell">
+              <a class="sh-button sh-button-secondary" href="{% url 'schedule-detail' schedule.pk %}" aria-label="View details for scheduled task #{{ schedule.pk }}">View details</a>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <section class="sh-empty schedule-empty" aria-labelledby="schedule-empty-title">
+      <h2 id="schedule-empty-title">No scheduled tasks</h2>
+      <p class="sh-muted">When a conversation has scheduled work, its next run and latest result will appear here.</p>
+    </section>
+  {% endif %}
+  </section>
 {% endblock %}

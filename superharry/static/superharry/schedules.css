@@ -1,0 +1,60 @@
+.schedule-page { display: grid; gap: 1rem; min-width: 0; }
+.schedule-page-heading { margin-bottom: 0; }
+.schedule-page-heading p { margin-top: .35rem; }
+.schedule-caption { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.schedule-table-region { min-width: 0; }
+.schedule-table { min-width: 0; table-layout: fixed; }
+.schedule-table th:nth-child(1) { width: 34%; }
+.schedule-table th:nth-child(2) { width: 14%; }
+.schedule-table th:nth-child(3) { width: 23%; }
+.schedule-table th:nth-child(4) { width: 17%; }
+.schedule-table th:nth-child(5) { width: 12%; }
+.schedule-table :is(th, td) { vertical-align: top; overflow-wrap: anywhere; }
+.schedule-table thead th { font-size: .78rem; line-height: 1.3; }
+.schedule-table tbody th { font-weight: 400; }
+.schedule-task-title, .schedule-task-prompt, .schedule-conversation, .schedule-provenance, .schedule-next-run span { display: block; }
+.schedule-task-title { color: var(--sh-text); font-weight: 700; }
+.schedule-task-prompt, .schedule-provenance { margin-top: .25rem; color: var(--sh-muted); font-size: .82rem; font-weight: 400; }
+.schedule-conversation { margin-top: .35rem; font-size: .85rem; }
+.schedule-status { white-space: normal; }
+.schedule-next-run span { margin-top: .2rem; color: var(--sh-muted); font-size: .78rem; }
+.schedule-outcome { font-size: .88rem; }
+.schedule-detail-cell { text-align: end !important; }
+.schedule-detail-cell .sh-button { min-height: 2.35rem; padding-inline: .6rem; font-size: .82rem; }
+.schedule-empty { padding: 1.2rem; }
+.schedule-empty h2, .schedule-detail-card h2, .schedule-actions h2 { font-size: 1.05rem; line-height: 1.35; }
+.schedule-empty p { max-width: 36rem; }
+.schedule-back-link { margin: 0; }
+.schedule-detail-card, .schedule-actions { display: grid; gap: .85rem; }
+.schedule-facts { display: grid; grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr); gap: 0 1rem; margin: 0; }
+.schedule-facts dt, .schedule-facts dd { padding: .65rem 0; border-top: 1px solid var(--sh-line); }
+.schedule-facts dt { color: var(--sh-muted); font-size: .88rem; font-weight: 650; }
+.schedule-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.schedule-facts .schedule-prompt-full, .schedule-facts .schedule-long-value { white-space: pre-wrap; }
+.schedule-model-form { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; }
+.schedule-model-form .sh-field { width: min(100%, 24rem); }
+.schedule-cancel-form { justify-self: start; }
+
+@media (max-width: 48rem) {
+  .schedule-table-region { overflow: visible; border: 0; background: transparent; }
+  .schedule-table { display: block; width: 100%; }
+  .schedule-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .schedule-table tbody { display: grid; gap: .65rem; }
+  .schedule-table tr { display: grid; gap: .45rem; padding: .85rem; border: 1px solid var(--sh-line); border-radius: var(--sh-radius); background: var(--sh-surface); }
+  .schedule-table :is(th, td) { display: grid; grid-template-columns: minmax(6.5rem, 34%) minmax(0, 1fr); gap: .65rem; width: auto; padding: .15rem 0; border: 0; text-align: start !important; }
+  .schedule-table tr > :is(th, td):nth-child(n) { width: auto; }
+  .schedule-table :is(th, td) > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .schedule-table [data-label]::before { color: var(--sh-muted); font-size: .78rem; font-weight: 650; content: attr(data-label); }
+  .schedule-table .schedule-detail-cell { justify-items: start; padding-top: .5rem; border-top: 1px solid var(--sh-line); }
+  .schedule-detail-cell .sh-button { min-height: var(--sh-target); }
+}
+
+@media (max-width: 32rem) {
+  .schedule-table :is(th, td) { grid-template-columns: minmax(5.3rem, 34%) minmax(0, 1fr); gap: .5rem; }
+  .schedule-facts { grid-template-columns: minmax(0, 1fr); }
+  .schedule-facts dt { padding-bottom: .1rem; border-bottom: 0; }
+  .schedule-facts dd { padding-top: .1rem; border-top: 0; }
+  .schedule-facts dt:not(:first-child) { padding-top: .65rem; border-top: 1px solid var(--sh-line); }
+  .schedule-model-form { align-items: stretch; flex-direction: column; }
+  .schedule-model-form .sh-field { width: 100%; }
+}

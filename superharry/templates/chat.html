@@ -1,155 +1,145 @@
+{% extends 'ui/base.html' %}
 {% load static tz %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %} · SuperHarry2</title>
-  <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
+{% block title %}{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %} · SuperHarry2{% endblock %}
+{% block body_class %}app-shell chat-page sh{% endblock %}
+{% block extra_head %}
+  {{ block.super }}
   <link rel="stylesheet" href="{% static 'superharry/vendor/filepond.min.css' %}">
-  <script src="{% static 'superharry/theme.js' %}"></script>
   <script src="{% static 'superharry/chat.js' %}" defer></script>
   <script src="{% static 'superharry/vendor/filepond.min.js' %}" defer></script>
   <script src="{% static 'superharry/file-preview.js' %}" type="module"></script>
-</head>
-<body class="app-shell chat-page">
-  {% include 'includes/navigation.html' with show_conversations=True %}
-  <main class="main-content chat-content">
-    <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
-    {% for schedule in schedules %}
-      <article>
-        <strong>Scheduled task #{{ schedule.pk }}</strong>
-        {% if schedule.created_by_id %}<p>Created by scheduled task #{{ schedule.created_by.schedule_id }} (run #{{ schedule.created_by_id }})</p>{% endif %}
-        <p>{{ schedule.prompt }}</p>
-        {% if schedule.repetition == "daily" %}<p>Daily</p>{% elif schedule.repetition == "weekly" %}<p>Weekly</p>{% endif %}
-        {% if schedule.canceled %}<p>Canceled</p>
-        {% elif schedule.next_run %}
-          <p>{% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</p>
-        {% elif schedule.running %}<p>Running</p>
-        {% else %}<p>Submitted or finished</p>{% endif %}
-        {% if not schedule.canceled and schedule.next_run or not schedule.canceled and schedule.running %}
-          <form method="post" action="{% url 'schedule-cancel' schedule.pk %}">
-            {% csrf_token %}<button type="submit">Cancel schedule</button>
-          </form>
-        {% endif %}
-      </article>
-    {% endfor %}
-    <section id="messages" aria-label="Messages">
-      {% if not conversation %}<p class="chat-welcome">What can we work on?</p>{% endif %}
-      {% for message in history %}
-        <article>
-          <header class="message-header">
-            <strong>{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
-            {% if message.role == "user" %}{% include 'includes/avatar.html' %}{% endif %}
-          </header>
-          {% if message.selected_skills %}
-            <p class="message-skill-mentions"><span>Skills:</span>
-              {% for skill_name in message.selected_skills %}
-                {% if skill_name|lower in available_skill_names %}<span class="skill-mention" title="Available skill: /{{ skill_name }}">/{{ skill_name }}</span>
-                {% else %}<span class="skill-mention is-unavailable" title="Unavailable skill: /{{ skill_name }}" aria-label="/{{ skill_name }}, unavailable">/{{ skill_name }}</span>{% endif %}
-              {% endfor %}
-            </p>
-          {% elif message.selected_skill %}
-            {% if message.selected_skill|lower in available_skill_names %}<small>Skill: {{ message.selected_skill }}</small>
-            {% else %}<small class="skill-mention is-unavailable" aria-label="Skill /{{ message.selected_skill }} is unavailable">Skill: /{{ message.selected_skill }} (unavailable)</small>{% endif %}
-          {% endif %}
-          {% for occurrence in message.scheduleoccurrence_set.all %}
-            <small>Scheduled task #{{ occurrence.schedule_id }}</small>
-            {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
-            {% if occurrence.failure_reason %}<p>Scheduled task failed: {{ occurrence.failure_reason }}</p>{% endif %}
+{% endblock %}
+{% block navigation %}{% include 'includes/navigation.html' with show_conversations=True %}{% endblock %}
+{% block ui_content %}
+<header class="sh-heading chat-heading">
+  <h1>{% if conversation %}{{ conversation.title }}{% else %}New chat{% endif %}</h1>
+  {% if conversation %}<a class="sh-button sh-button-quiet" href="{% url 'conversation-files' conversation.pk %}"><svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-folder"></use></svg> Conversation files</a>{% endif %}
+</header>
+
+<section class="chat-scheduled-tasks" aria-label="Scheduled tasks">
+  {% for schedule in schedules %}
+    <article class="sh-schedule-line">
+      <svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-calendar"></use></svg>
+      {% if schedule.canceled %}<span class="sh-status">Canceled</span>
+      {% elif schedule.running %}<span class="sh-status sh-status-info">Running</span>
+      {% elif schedule.next_run %}<span class="sh-status sh-status-success">Scheduled</span>
+      {% else %}<span class="sh-status">Submitted or finished</span>{% endif %}
+      <span class="sh-schedule-prompt">{{ schedule.prompt|truncatechars:100 }}</span>
+      {% if schedule.repetition == "daily" %}<span>Daily</span>{% elif schedule.repetition == "weekly" %}<span>Weekly</span>{% endif %}
+      {% if schedule.next_run and not schedule.canceled %}<span>Next: {% localtime off %}{{ schedule.local_next_run|date:"Y-m-d H:i T" }}{% endlocaltime %} ({{ schedule.timezone }})</span>{% endif %}
+      <a href="{% url 'schedule-detail' schedule.pk %}">View task details</a>
+    </article>
+  {% endfor %}
+</section>
+
+<section id="messages" class="sh-transcript" aria-label="Messages">
+  {% if not conversation %}<p class="chat-welcome">What can we work on?</p>{% endif %}
+  {% for message in history %}
+    <article class="sh-message{% if message.role == 'user' %} sh-message-user{% endif %}">
+      <header class="message-header">
+        <strong class="sh-message-label">{% if message.role == "user" %}You{% else %}Assistant{% endif %}</strong>
+        {% if message.role == "user" %}{% include 'includes/avatar.html' %}{% endif %}
+      </header>
+      {% if message.selected_skills %}
+        <p class="message-skill-mentions"><span>Skills:</span>
+          {% for skill_name in message.selected_skills %}
+            {% if skill_name|lower in available_skill_names %}<span class="skill-mention" title="Available skill: /{{ skill_name }}">/{{ skill_name }}</span>
+            {% else %}<span class="skill-mention is-unavailable" title="Unavailable skill: /{{ skill_name }}" aria-label="/{{ skill_name }}, unavailable">/{{ skill_name }}</span>{% endif %}
           {% endfor %}
-          <p>{{ message.content }}</p>
-          {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a> <button type="button" class="preview-file" data-url="{% url 'input-download' attachment.pk %}" data-name="{{ attachment.name }}">Preview</button></p>{% endfor %}
-          {% for attachment in message.removed_attachments.all %}<p>{{ attachment.name }} is no longer available</p>{% endfor %}
-          {% for run in message.skill_runs.all %}
-            <p><a href="{% url 'skill-run-detail' run.job_id %}">View {{ run.skill_name }} result</a></p>
-            <div class="skill-artifacts" data-status-url="{% url 'skill-artifact-status' run.job_id %}" aria-live="polite"></div>
-          {% endfor %}
-          {% if message.in_progress %}
-            <small>Reply in progress</small>
-          {% elif not message.complete %}
-            <div class="message-retry-row">
-              <small>Incomplete reply</small>
-            {% if message.prompt_id and not message.has_later_attempt %}
-              <form class="chat-retry" method="post" action="{% url 'chat-retry' conversation.pk message.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="submission_id" value="{{ submission_id }}">
-                <button type="submit">Retry reply</button>
-              </form>
-            {% endif %}
-            </div>
-          {% endif %}
-        </article>
-      {% endfor %}
-    </section>
-    <p id="chat-status" role="status"></p>
-    <p><a id="chat-history" hidden>Open saved conversation</a></p>
-    <form id="composer" method="post" enctype="multipart/form-data" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
-      {% csrf_token %}
-      <input type="hidden" name="submission_id" value="{{ submission_id }}">
-      {% if not conversation %}
-        <label>
-          <input type="checkbox" name="memory_enabled">
-          Use saved memories in this conversation
-        </label>
+        </p>
+      {% elif message.selected_skill %}
+        {% if message.selected_skill|lower in available_skill_names %}<small>Skill: {{ message.selected_skill }}</small>
+        {% else %}<small class="skill-mention is-unavailable" aria-label="Skill /{{ message.selected_skill }} is unavailable">Skill: /{{ message.selected_skill }} (unavailable)</small>{% endif %}
       {% endif %}
-      <label class="visually-hidden" for="message">Message</label>
-      <div class="composer-message">
-        <pre id="message-highlights" class="message-highlights" aria-hidden="true"></pre>
-        <textarea id="message" name="message" rows="3" placeholder="Ask SuperHarry" required aria-autocomplete="list" aria-controls="skill-suggestions"></textarea>
-        <div id="skill-suggestions" class="skill-suggestions" role="listbox" aria-label="Skill suggestions" hidden></div>
-        <span id="skill-suggestion-status" class="visually-hidden" role="status" aria-live="polite"></span>
+      {% for occurrence in message.scheduleoccurrence_set.all %}
+        <small>Scheduled task #{{ occurrence.schedule_id }}</small>
+        {% if occurrence.user_request %}<p>Needs user input: {{ occurrence.user_request }}</p>{% endif %}
+        {% if occurrence.failure_reason %}<p>Scheduled task failed: {{ occurrence.failure_reason }}</p>{% endif %}
+      {% endfor %}
+      <p>{{ message.content }}</p>
+      {% for attachment in message.attachments.all %}<p><a href="{% url 'input-download' attachment.pk %}">Download {{ attachment.name }}</a> <button class="sh-button sh-button-quiet preview-file" type="button" data-url="{% url 'input-download' attachment.pk %}" data-name="{{ attachment.name }}">Preview</button></p>{% endfor %}
+      {% for attachment in message.removed_attachments.all %}<p>{{ attachment.name }} is no longer available</p>{% endfor %}
+      {% for run in message.skill_runs.all %}
+        <p><a href="{% url 'skill-run-detail' run.job_id %}">View {{ run.skill_name }} result</a></p>
+        <div class="skill-artifacts" data-status-url="{% url 'skill-artifact-status' run.job_id %}" aria-live="polite"></div>
+      {% endfor %}
+      {% if message.in_progress %}
+        <small class="sh-status sh-status-info">Reply in progress</small>
+      {% elif not message.complete %}
+        <div class="message-retry-row">
+          <small class="sh-status sh-status-warning">Incomplete reply</small>
+          {% if message.prompt_id and not message.has_later_attempt %}
+            <form class="chat-retry" method="post" action="{% url 'chat-retry' conversation.pk message.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="submission_id" value="{{ submission_id }}">
+              <button class="sh-button sh-button-secondary" type="submit">Retry reply</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>
+
+<p id="chat-status" class="sh-notice" role="status" aria-live="polite"></p>
+<p><a id="chat-history" hidden>Open saved conversation</a></p>
+<form id="composer" class="sh-composer" method="post" enctype="multipart/form-data" action="{% if conversation %}{% url 'chat-continue' conversation.pk %}{% else %}{% url 'chat-send' %}{% endif %}">
+  {% csrf_token %}
+  <input type="hidden" name="submission_id" value="{{ submission_id }}">
+  {% if not conversation %}
+    <label class="sh-check"><input type="checkbox" name="memory_enabled"> Use saved memories in this conversation</label>
+  {% else %}
+    <p class="sh-memory-state" aria-label="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}" title="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}">Saved memory for this conversation: <strong>{% if conversation.memory_enabled %}On{% else %}Off{% endif %}</strong></p>
+  {% endif %}
+  <label class="visually-hidden" for="message">Message</label>
+  <div class="composer-message">
+    <pre id="message-highlights" class="message-highlights" aria-hidden="true"></pre>
+    <textarea id="message" name="message" rows="3" placeholder="Ask SuperHarry" required aria-autocomplete="list" aria-controls="skill-suggestions"></textarea>
+    <div id="skill-suggestions" class="skill-suggestions" role="listbox" aria-label="Skill suggestions" hidden></div>
+    <span id="skill-suggestion-status" class="visually-hidden" role="status" aria-live="polite"></span>
+  </div>
+  <div class="composer-options sh-composer-toolbar">
+    {% if conversation %}
+      <span class="context-doughnut" role="img" aria-label="{% if context_limit %}Approximate context: {{ context_estimate }} used, {{ response_reservation_tokens }} reserved, {{ context_limit }} capacity{% else %}Context capacity unknown{% endif %}"{% if context_used_percent != None %} style="--context-used: {{ context_used_percent }}%"{% endif %}>
+        <span>{% if context_limit %}~{{ context_estimate }} / {{ context_limit }}{% else %}Context unknown{% endif %}</span>
+      </span>
+      <button type="button" id="compact-context" class="sh-button sh-button-quiet composer-action" data-endpoint="{% url 'conversation-compact' conversation.pk %}">Compact context</button>
+    {% endif %}
+    <details class="composer-popover sh-disclosure">
+      <summary class="sh-button sh-button-quiet" aria-label="Attach files"><svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-clip"></use></svg><span>Attach files</span></summary>
+      <div class="composer-panel sh-popover"><label for="attachment">Attach files</label><input id="attachment" type="file" name="attachment" multiple>
+        <small>Files are saved with this conversation. Skills support CSV summaries, basic PDF, DOCX and XLSX reading and creation, and PNG/JPEG resizing, cropping and conversion. Image understanding and image generation require a separate compatible capability.</small>
       </div>
-      <div class="composer-options">
-        {% if conversation %}
-          <a class="composer-action" href="{% url 'conversation-files' conversation.pk %}">
-            <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#folder-open"></use></svg>
-            <span>Conversation files</span>
-          </a>
-          <span class="context-doughnut" role="img" aria-label="{% if context_limit %}Approximate context: {{ context_estimate }} used, {{ response_reservation_tokens }} reserved, {{ context_limit }} capacity{% else %}Context capacity unknown{% endif %}"{% if context_used_percent != None %} style="--context-used: {{ context_used_percent }}%"{% endif %}>
-            <span>{% if context_limit %}~{{ context_estimate }} / {{ context_limit }}{% else %}Context unknown{% endif %}</span>
-          </span>
-          <button type="button" id="compact-context" class="composer-action" data-endpoint="{% url 'conversation-compact' conversation.pk %}">Compact context</button>
-          <span class="conversation-memory-state" title="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}" aria-label="Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}">
-            <svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#brain"></use></svg>
-            <span class="visually-hidden">Memory: {% if conversation.memory_enabled %}On{% else %}Off{% endif %}</span>
-          </span>
-        {% endif %}
-        <details class="composer-popover">
-          <summary aria-label="Attach files" title="Attach files"><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#plus"></use></svg><span>Files</span></summary>
-          <div class="composer-panel"><label for="attachment">Attach files</label><input id="attachment" type="file" name="attachment" multiple>
-          <small>Files are saved with this conversation. Skills support CSV summaries, basic PDF, DOCX and XLSX reading and creation, and PNG/JPEG resizing, cropping and conversion. Image understanding and image generation require a separate compatible capability.</small></div>
-        </details>
-        <details class="composer-popover">
-          <summary><svg aria-hidden="true"><use href="{% static 'superharry/vendor/fontawesome-icons.svg' %}#puzzle-piece"></use></svg> Skills</summary>
-          <div class="composer-panel"><label for="selected-skill">Skill (optional)</label>
-          <input id="selected-skill" name="selected_skill" list="available-skills" autocomplete="off" placeholder="Search skills">
-          <datalist id="available-skills">{% for item in available_skills %}<option value="{{ item.name }}">{{ item.purpose }}</option>{% endfor %}</datalist>
-          <small>Use <code>/summarize</code> followed by text for a quick summary.</small></div>
-        </details>
-        <span id="selected-skill-label" class="selected-skill-label" aria-live="polite"></span>
-        <span class="composer-model" aria-label="Active model">Model: {{ active_model|default:"Not configured" }}</span>
-        <label class="composer-model" for="conversation-model">Model
-          <select id="conversation-model" name="model" data-selection="{{ model_selection }}"{% if conversation %} data-endpoint="{% url 'conversation-model' conversation.pk %}"{% endif %}>
-          {% for option in model_options %}<option value="{{ option.id }}" data-efforts="{% for effort in option.efforts %}{{ effort }}{% if not forloop.last %},{% endif %}{% endfor %}"{% if option.id == model_selection %} selected{% endif %}{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
-          </select>
-        </label>
-        <label class="composer-model reasoning-control" for="reasoning-effort"{% if not reasoning_options %} hidden{% endif %}>Reasoning
-          <input id="reasoning-effort" type="range" name="reasoning_effort" min="0" max="{{ reasoning_options|length }}" step="1" value="{% if reasoning_effort == 'none' %}0{% else %}{% for option in reasoning_options %}{% if option == reasoning_effort %}{{ forloop.counter }}{% endif %}{% endfor %}{% endif %}" data-choices="none{% for option in reasoning_options %},{{ option }}{% endfor %}"{% if conversation %} data-endpoint="{% url 'conversation-reasoning' conversation.pk %}"{% endif %}>
-          <output id="reasoning-label">{% if reasoning_effort == 'none' %}Off{% else %}{{ reasoning_effort|capfirst }}{% endif %}</output>
-        </label>
-        <button type="submit">Send</button>
+    </details>
+    <details class="composer-popover sh-disclosure">
+      <summary class="sh-button sh-button-quiet"><svg class="sh-icon" aria-hidden="true"><use href="{% static 'superharry/components-icons.svg' %}#icon-skill"></use></svg> Skills</summary>
+      <div class="composer-panel sh-popover"><label for="selected-skill">Skill (optional)</label>
+        <input id="selected-skill" name="selected_skill" list="available-skills" autocomplete="off" placeholder="Search skills">
+        <datalist id="available-skills">{% for item in available_skills %}<option value="{{ item.name }}" label="{{ item.purpose }}">{% endfor %}</datalist>
+        <small>Use <code>/summarize</code> followed by text for a quick summary.</small>
       </div>
-    </form>
-    {% if conversation_events %}<section id="conversation-events" aria-label="Conversation events">{% for event in conversation_events %}<p>{{ event.content }}</p>{% endfor %}</section>{% endif %}
-  </main>
-  <aside id="file-preview" class="file-preview" aria-label="File preview" hidden>
-    <header><h2 id="preview-name">File preview</h2><button type="button" id="preview-close">Close preview</button></header>
-    <p id="preview-status" role="status"></p>
-    <img id="preview-image" alt="" hidden>
-    <canvas id="preview-pdf" aria-label="PDF page preview" hidden></canvas>
-    <div id="preview-pages" hidden><button type="button" id="preview-prev">Previous page</button> <span id="preview-page-number"></span> <button type="button" id="preview-next">Next page</button></div>
-    <a id="preview-download" hidden>Download file</a>
-  </aside>
-</body>
-</html>
+    </details>
+    <span id="selected-skill-label" class="selected-skill-label sh-muted" aria-live="polite"></span>
+    <span class="composer-model" aria-label="Active model">Model: {{ active_model|default:"Not configured" }}</span>
+    <label class="composer-model sh-model" for="conversation-model">Model
+      <select id="conversation-model" name="model" data-selection="{{ model_selection }}"{% if conversation %} data-endpoint="{% url 'conversation-model' conversation.pk %}"{% endif %}>
+        {% for option in model_options %}<option value="{{ option.id }}" data-efforts="{% for effort in option.efforts %}{{ effort }}{% if not forloop.last %},{% endif %}{% endfor %}"{% if option.id == model_selection %} selected{% endif %}{% if option.disabled %} disabled{% endif %}>{{ option.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="composer-model reasoning-control sh-model" for="reasoning-effort"{% if not reasoning_options %} hidden{% endif %}>Reasoning
+      <input id="reasoning-effort" type="range" name="reasoning_effort" min="0" max="{{ reasoning_options|length }}" step="1" value="{% if reasoning_effort == 'none' %}0{% else %}{% for option in reasoning_options %}{% if option == reasoning_effort %}{{ forloop.counter }}{% endif %}{% endfor %}{% endif %}" data-choices="none{% for option in reasoning_options %},{{ option }}{% endfor %}"{% if conversation %} data-endpoint="{% url 'conversation-reasoning' conversation.pk %}"{% endif %}>
+      <output id="reasoning-label">{% if reasoning_effort == 'none' %}Off{% else %}{{ reasoning_effort|capfirst }}{% endif %}</output>
+    </label>
+    <button class="sh-button sh-button-primary sh-send" type="submit">Send</button>
+  </div>
+</form>
+{% if conversation_events %}<section id="conversation-events" aria-label="Conversation events">{% for event in conversation_events %}<p>{{ event.content }}</p>{% endfor %}</section>{% endif %}
+<aside id="file-preview" class="file-preview" aria-label="File preview" hidden>
+  <header><h2 id="preview-name">File preview</h2><button class="sh-button sh-button-secondary" type="button" id="preview-close">Close preview</button></header>
+  <p id="preview-status" role="status"></p>
+  <img id="preview-image" alt="" hidden>
+  <canvas id="preview-pdf" aria-label="PDF page preview" hidden></canvas>
+  <div id="preview-pages" hidden><button class="sh-button sh-button-secondary" type="button" id="preview-prev">Previous page</button> <span id="preview-page-number"></span> <button class="sh-button sh-button-secondary" type="button" id="preview-next">Next page</button></div>
+  <a id="preview-download" hidden>Download file</a>
+</aside>
+{% endblock %}

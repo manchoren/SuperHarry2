@@ -4,17 +4,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Saved memories{% endblock %} · SuperHarry2</title>
+  <title>{% block title %}SuperHarry2{% endblock %} · SuperHarry2</title>
   <link rel="stylesheet" href="{% static 'superharry/chat.css' %}">
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{% static 'superharry/management-tables.css' %}">
-  <link rel="stylesheet" href="{% static 'superharry/folders-tabs.css' %}">
+  <link rel="stylesheet" href="{% static 'superharry/components.css' %}">
   <script src="{% static 'superharry/theme.js' %}"></script>
 </head>
-<body class="app-shell">
-  {% include 'includes/navigation.html' %}
+<body class="{% block body_class %}app-shell sh{% endblock %}">
+  {% block navigation %}{% include 'includes/navigation.html' %}{% endblock %}
   <main class="main-content">
-    {% block content %}{% endblock %}
+    {% block content %}{% block ui_content %}{% endblock %}{% endblock %}
   </main>
   {% block extra_scripts %}{% endblock %}
 </body>

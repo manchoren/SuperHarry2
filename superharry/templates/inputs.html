@@ -1,31 +1,36 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
 {% block title %}Chat inputs{% endblock %}
-{% block content %}
-<h1>Chat inputs</h1>
-<p>The model receives your input names and IDs in chat. Input contents are sent only when selected for scheduled work.</p>
+{% block ui_content %}
+<header class="sh-heading">
+  <div>
+    <h1>Chat inputs</h1>
+    <p class="sh-muted">The model receives input names and IDs in chat. Input contents are sent only when selected for scheduled work.</p>
+  </div>
+</header>
 {% include 'includes/folder_tabs.html' with active_folder_tab='inputs' %}
-{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-<form method="post" enctype="multipart/form-data">{% csrf_token %}
-  <label>Text, CSV, PNG or JPEG file <input type="file" name="file" required></label>
-  <button type="submit">Upload</button>
+{% if error %}<p class="sh-notice sh-notice-error" role="alert">{{ error }}</p>{% endif %}
+<form class="sh-card sh-stack input-upload-form" method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <label class="sh-field">Text, CSV, PNG or JPEG file <input type="file" name="file" required></label>
+  <div class="sh-actions"><button class="sh-button sh-button-primary" type="submit">Upload</button></div>
 </form>
-<div class="listing-table-scroll" role="region" aria-label="Chat inputs" tabindex="0">
-  <table class="listing-table">
-    <caption class="visually-hidden">Uploaded chat inputs</caption>
+<div class="sh-table-region" role="region" aria-label="Chat inputs" tabindex="0">
+  <table class="sh-table">
+    <caption class="sh-sr-only">Uploaded chat inputs</caption>
     <thead><tr><th scope="col">Input</th><th scope="col">Conversation</th><th scope="col">Uploaded</th><th scope="col">Actions</th></tr></thead>
     <tbody>
       {% for item in inputs %}
         <tr>
           <th scope="row" data-label="Input"><a href="{% url 'input-detail' item.pk %}">Input #{{ item.pk }}: {{ item.name|truncatechars:72 }}</a></th>
           <td data-label="Conversation">{% if item.message_id and item.message.conversation_id %}<a href="{% url 'chat-history' item.message.conversation_id %}">{{ item.message.conversation.title }}</a>{% else %}Not attached to a conversation{% endif %}</td>
-          <td data-label="Uploaded">{% if item.created_at %}{{ item.created_at }}{% else %}Date unavailable{% endif %}</td>
-          <td class="listing-actions" data-label="Actions">
-            <a class="listing-action" href="{% url 'input-download' item.pk %}">Download</a>
-            <form method="post" action="{% url 'input-delete' item.pk %}">{% csrf_token %}<button class="listing-action listing-danger-action" type="submit">Delete</button></form>
-          </td>
+          <td data-label="Uploaded">{% if item.created_at %}<time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at }}</time>{% else %}Date unavailable{% endif %}</td>
+          <td data-label="Actions"><div class="sh-actions">
+            <a class="sh-button sh-button-quiet" href="{% url 'input-download' item.pk %}">Download</a>
+            <form method="post" action="{% url 'input-delete' item.pk %}">{% csrf_token %}<button class="sh-button sh-button-danger" type="submit">Delete</button></form>
+          </div></td>
         </tr>
       {% empty %}
-        <tr><td class="listing-empty" colspan="4">No chat inputs yet. Upload a text, CSV, PNG or JPEG file to get started.</td></tr>
+        <tr><td colspan="4"><div class="sh-empty"><strong>No chat inputs yet.</strong><p>Upload a text, CSV, PNG or JPEG file to get started.</p></div></td></tr>
       {% endfor %}
     </tbody>
   </table>

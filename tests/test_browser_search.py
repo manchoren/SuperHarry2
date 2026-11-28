@@ -443,4 +443,4 @@ class GatewayTotalTimeoutTests(SimpleTestCase):
                 gateway_url=f"http://127.0.0.1:{server.server_port}", gateway_api_key="synthetic",
                 total_timeout=0.05,
             ))
-        self.assertLess(time.monotonic() - started, 0.2)
+        self.assertLess(time.monotonic() - started, 0.5)

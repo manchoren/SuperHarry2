@@ -1,39 +1,8 @@
-{% extends 'memories/base.html' %}
+{% extends 'ui/base.html' %}
+{% load static %}
 {% block title %}Conversation files{% endblock %}
-{% block content %}
-<h1>Conversation files</h1>
-<p><a href="{% url 'chat-history' conversation.pk %}">Back to {{ conversation.title }}</a></p>
-<p>Generated files with related names are grouped. Move a file to correct a group, or separate it into a new group.</p>
-{% for group in groups %}
-<section aria-labelledby="artifact-group-{{ group.pk }}">
-  <h2 id="artifact-group-{{ group.pk }}">{{ group.name }}</h2>
-  <div class="listing-table-scroll" role="region" aria-label="Files in {{ group.name }}" tabindex="0">
-    <table class="listing-table">
-      <caption class="visually-hidden">Generated files in {{ group.name }}</caption>
-      <thead><tr><th scope="col">File</th><th scope="col">Skill</th><th scope="col">Updated</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
-      <tbody>
-        {% for artifact in group.artifacts.all %}
-          <tr>
-            <th scope="row" data-label="File"><a href="{% url 'file-detail' 'artifact' artifact.pk %}">{{ artifact.name|truncatechars:72 }}</a></th>
-            <td data-label="Skill">{{ artifact.run.skill_name }}</td>
-            <td data-label="Updated">{% if artifact.updated_at %}<time datetime="{{ artifact.updated_at|date:'c' }}">{{ artifact.updated_at }}</time>{% else %}Date unavailable{% endif %}</td>
-            <td data-label="Status">{% if artifact.partial %}Partial result{% else %}Complete{% endif %}</td>
-            <td class="listing-actions" data-label="Actions">
-              <a class="listing-action" href="{% url 'skill-artifact-download' artifact.pk %}">Download</a>
-              <form method="post" action="{% url 'artifact-move' conversation.pk artifact.pk %}">{% csrf_token %}
-                <label class="visually-hidden" for="group-{{ artifact.pk }}">Group for {{ artifact.name }}</label>
-                <select id="group-{{ artifact.pk }}" name="group">{% for option in groups %}<option value="{{ option.pk }}"{% if option.pk == group.pk %} selected{% endif %}>{{ option.name }} (#{{ option.pk }})</option>{% endfor %}<option value="new">New separate group</option></select>
-                <button class="listing-action" type="submit">Move</button>
-              </form>
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td class="listing-empty" colspan="5">This group has no files.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="listing-actions"><a class="listing-action listing-danger-action group-delete-action" href="{% url 'artifact-group-delete' conversation.pk group.pk %}">Review deletion of all versions in {{ group.name|truncatechars:72 }}</a></p>
-</section>
-{% empty %}<p>No generated files yet.</p>{% endfor %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'superharry/file-history.css' %}">{% endblock %}
+{% block ui_content %}{% include 'includes/folder_tabs.html' with active_folder_tab='files' %}
+<header class="sh-heading"><div><h1>Conversation files</h1><p>Generated files with related names are grouped. Move a file to correct a group, or separate it into a new group.</p></div><a class="sh-button sh-button-secondary" href="{% url 'chat-history' conversation.pk %}">Back to {{ conversation.title }}</a></header>
+{% for group in groups %}<section class="conversation-file-group" aria-labelledby="artifact-group-{{ group.pk }}"><h2 id="artifact-group-{{ group.pk }}">{{ group.name }}</h2><div class="sh-table-region" role="region" aria-label="Files in {{ group.name }}" tabindex="0"><table class="sh-table"><caption class="visually-hidden">Generated files in {{ group.name }}</caption><thead><tr><th scope="col">File</th><th scope="col">Skill</th><th scope="col">Updated</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>{% for artifact in group.artifacts.all %}<tr><th scope="row" data-label="File"><a href="{% url 'file-detail' 'artifact' artifact.pk %}">{{ artifact.name|truncatechars:72 }}</a></th><td data-label="Skill">{{ artifact.run.skill_name }}</td><td data-label="Updated">{% if artifact.updated_at %}<time datetime="{{ artifact.updated_at|date:'c' }}">{{ artifact.updated_at }}</time>{% else %}Date unavailable{% endif %}</td><td data-label="Status">{% if artifact.partial %}Partial result{% else %}Complete{% endif %}</td><td class="conversation-file-actions" data-label="Actions"><a class="sh-button sh-button-secondary" href="{% url 'skill-artifact-download' artifact.pk %}">Download</a><form method="post" action="{% url 'artifact-move' conversation.pk artifact.pk %}">{% csrf_token %}<label class="visually-hidden" for="group-{{ artifact.pk }}">Group for {{ artifact.name }}</label><select class="sh-input" id="group-{{ artifact.pk }}" name="group">{% for option in groups %}<option value="{{ option.pk }}"{% if option.pk == group.pk %} selected{% endif %}>{{ option.name }} (#{{ option.pk }})</option>{% endfor %}<option value="new">New separate group</option></select><button class="sh-button sh-button-secondary" type="submit">Move</button></form></td></tr>{% empty %}<tr><td class="sh-empty" colspan="5">This group has no files.</td></tr>{% endfor %}</tbody></table></div><p><a class="sh-button sh-button-danger" href="{% url 'artifact-group-delete' conversation.pk group.pk %}">Review deletion of all versions in {{ group.name|truncatechars:72 }}</a></p></section>{% empty %}<p class="sh-empty">No generated files yet.</p>{% endfor %}
 {% endblock %}

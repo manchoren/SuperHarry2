@@ -59,7 +59,7 @@ try:
             assert page.get_by_role("table").is_visible()
             file_name = page.get_by_role("rowheader").filter(has_text=long_name[:32])
             assert file_name.is_visible()
-            assert page.locator("main a").count() == 0
+            assert page.get_by_role("navigation", name="Folder sections").get_by_role("link").count() == 2
             header_widths = page.locator("thead th").evaluate_all(
                 "headers => headers.map(header => header.getBoundingClientRect().width)"
             )
@@ -68,22 +68,22 @@ try:
 
             page.set_viewport_size({"width": 1158, "height": 828})
             assert file_name.is_visible()
-            assert page.get_by_role("button", name="Download").is_visible()
+            assert page.get_by_role("link", name="Download").is_visible()
             assert page.get_by_role("group", name="File actions").is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
-            page.get_by_role("button", name="Details").click()
+            page.get_by_role("link", name="Details").click()
             assert page.get_by_text(long_name, exact=True).is_visible()
 
             page.goto(f"http://127.0.0.1:{server.server_port}/files/")
             page.set_viewport_size({"width": 375, "height": 812})
             assert page.get_by_role("table").is_visible()
-            assert page.get_by_role("button", name="Download").is_visible()
+            assert page.get_by_role("link", name="Download").is_visible()
             assert page.get_by_role("group", name="File actions").is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         finally:
             browser.close()
-    print("PASS: desktop columns, button-only actions, and mobile file-history layout")
+    print("PASS: desktop columns, shared file actions, and mobile file-history layout")
 finally:
     server.shutdown()
     thread.join()

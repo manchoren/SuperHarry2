@@ -1,24 +1,23 @@
-{% extends "memories/base.html" %}
+{% extends 'ui/base.html' %}
 {% block title %}CSV summary{% endblock %}
-{% block content %}
-  <h1>CSV summary</h1>
-  <p>{{ record.name }}</p>
+{% block ui_content %}
+<nav aria-label="Breadcrumb"><a href="{% url 'csv-upload' %}">Previous CSV results</a></nav>
+<header class="sh-heading"><div><h1>CSV summary</h1><p class="sh-muted">{{ record.name }}</p></div></header>
+<section class="sh-card sh-stack" aria-label="Summary result">
   {% if result.status == "complete" %}
-    <p>Data rows: {{ result.summary.rows }}</p>
-    <ul>
-      {% for column in result.summary.columns %}
-        <li>{{ column.name }} ({{ column.empty }} empty cells)</li>
-      {% endfor %}
-    </ul>
-    <a href="{% url 'csv-download' record.pk %}">Download summary</a>
+    <p class="sh-status" role="status">Summary complete. Data rows: {{ result.summary.rows }}</p>
+    <h2>Columns</h2>
+    <div class="sh-table-region" role="region" aria-label="Summary columns" tabindex="0"><table class="sh-table"><thead><tr><th scope="col">Column</th><th scope="col">Empty cells</th></tr></thead><tbody>
+      {% for column in result.summary.columns %}<tr><th scope="row" data-label="Column">{{ column.name }} ({{ column.empty }} empty cells)</th><td data-label="Empty cells">{{ column.empty }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="sh-actions"><a class="sh-button sh-button-primary" href="{% url 'csv-download' record.pk %}">Download summary</a></div>
   {% elif result %}
-    <p role="status">{% if result.status == "timeout" %}The summary timed out.{% else %}The CSV could not be summarized.{% endif %}</p>
+    <p class="sh-notice sh-notice-error" role="status">{% if result.status == "timeout" %}The summary timed out.{% else %}The CSV could not be summarized.{% endif %}</p>
   {% elif job %}
-    <p role="status">An approved summary is queued or running.</p>
-    <a href="{% url 'csv-detail' record.pk %}">Refresh status</a>
+    <p class="sh-status" role="status">An approved summary is queued or running.</p>
+    <div class="sh-actions"><a class="sh-button sh-button-secondary" href="{% url 'csv-detail' record.pk %}">Refresh status</a></div>
   {% endif %}
-  {% if not runner_configured %}
-    <p>The CSV runner is unavailable.</p>
-  {% endif %}
-  <a href="{% url 'csv-upload' %}">Previous CSV results</a>
+  {% if not runner_configured %}<p class="sh-notice">The CSV runner is unavailable.</p>{% endif %}
+</section>
+<p><a href="{% url 'csv-upload' %}">Back to previous CSV results</a></p>
 {% endblock %}

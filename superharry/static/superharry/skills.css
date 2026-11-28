@@ -1,0 +1,13 @@
+.skill-page { display: grid; gap: 1.25rem; width: min(100%, 76rem); margin-inline: auto; padding: 1rem; }
+.skill-page > :is(section, article, form, .skill-panel) { min-width: 0; }
+.skill-page .sh-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 1rem; }
+.skill-page :is(.skill-panel, section) { display: grid; gap: .8rem; min-width: 0; padding: 1rem; border: 1px solid var(--sh-line); border-radius: var(--sh-radius); background: var(--sh-surface); }
+.skill-page :is(pre, code) { overflow-wrap: anywhere; }
+.skill-page pre { max-width: 100%; overflow: auto; white-space: pre-wrap; padding: .75rem; border: 1px solid var(--sh-line); border-radius: var(--sh-radius); background: var(--sh-panel); }
+.skill-page .skill-table-wrap { min-width: 0; overflow-x: auto; }
+.skill-page .sh-table { min-width: 42rem; }
+.skill-page :is(input, select, textarea) { max-width: 100%; }
+.skill-page .browser-workspace { min-width: 0; }
+.skill-page .browser-session :is(button, input) { max-width: 100%; }
+.skill-page .browser-action-review[hidden] { display: none; }
+@media (max-width: 640px) { .skill-page { padding: .75rem; } .skill-page .sh-heading { align-items: stretch; } }

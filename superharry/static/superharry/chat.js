@@ -257,16 +257,20 @@ if (input && highlights && skillSuggestions) {
 
 function appendMessage(role, text) {
   const article = document.createElement("article");
+  article.className = `sh-message${role === "You" ? " sh-message-user" : ""}`;
+  const header = document.createElement("header");
+  header.className = "message-header";
   const label = document.createElement("strong");
+  label.className = "sh-message-label";
   const content = document.createElement("p");
   label.textContent = role;
   content.textContent = text;
-  article.append(label);
+  header.append(label);
   if (role === "You") {
     const avatar = document.querySelector(".sidebar-footer .user-avatar");
-    if (avatar) article.append(avatar.cloneNode(true));
+    if (avatar) header.append(avatar.cloneNode(true));
   }
-  article.append(content);
+  article.append(header, content);
   messages.append(article);
   return content;
 }
